@@ -1242,35 +1242,77 @@ private struct BarrageWindow: View {
     @State private var editDifficulty: Difficulty = .veteran
     var body: some View {
         VStack(spacing:0) {
-            HStack(spacing:14) {
-                Text("VECTOR BARRAGE").font(.system(size:16,weight:.heavy,design:.monospaced)).tracking(2)
-                Text("v1.2.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
-                Spacer()
-                Picker("Display",selection:$game.mode) {
-                    ForEach(VisualMode.allCases) { Text($0.rawValue).tag($0) }
-                }.frame(width:180)
-                Picker("Level",selection:$game.difficulty) {
-                    ForEach(Difficulty.allCases) { Text($0.rawValue).tag($0) }
-                }.frame(width:140)
-                Toggle(isOn: $game.rules.soundEnabled) {
-                    Image(systemName:game.rules.soundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                }.toggleStyle(.button).help("Arcade sound effects")
-                Button("Truck") { game.redistributeAmmo() }.help("T: balance rounds via 3-second supply truck")
-                Button("Nuclear") { game.launchNuclear() }.help("N: fire selected battery's one nuclear interceptor")
-                Button("Custom Game") {
-                    editRules=game.rules;editMode=game.mode;editDifficulty=game.difficulty
-                    showCustom=true
+            VStack(spacing:10) {
+                HStack(alignment:.center,spacing:12) {
+                    VStack(alignment:.leading,spacing:3) {
+                        HStack(alignment:.firstTextBaseline,spacing:9) {
+                            Text("VECTOR BARRAGE")
+                                .font(.system(size:19,weight:.black,design:.monospaced))
+                                .foregroundStyle(.white)
+                            Text("v1.2.1")
+                                .font(.system(size:10,weight:.medium,design:.monospaced))
+                                .foregroundStyle(.gray)
+                        }
+                        Text("ARCADE  /  MACOS")
+                            .font(.system(size:9,weight:.semibold,design:.monospaced))
+                            .foregroundStyle(.cyan.opacity(0.70))
+                    }
+                    Spacer(minLength:14)
+                    Button("Custom Game") {
+                        editRules=game.rules;editMode=game.mode;editDifficulty=game.difficulty
+                        showCustom=true
+                    }
+                    Button("Save Game") {
+                        if game.saveBattle() { saveNotice="Battle saved." }
+                        else { saveNotice="Start a battle before saving." }
+                    }
+                    Button("Resume") { savedBattles=BattleStore.list();showSaved=true }
+                    Toggle("Sound",isOn:$game.rules.soundEnabled)
+                        .toggleStyle(.checkbox)
+                    Button("New Game") { game.start() }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.cyan)
+                        .keyboardShortcut("r",modifiers:[.command])
                 }
-                Button("Save Game") {
-                    if game.saveBattle() { saveNotice="Battle saved." }
-                    else { saveNotice="Start a battle before saving." }
+                HStack(spacing:12) {
+                    Text("DIFFICULTY")
+                        .font(.system(size:10,weight:.bold,design:.monospaced))
+                        .foregroundStyle(.gray)
+                    HStack(spacing:3) {
+                        ForEach(Difficulty.allCases) { level in
+                            Button(level.rawValue) { game.difficulty=level }
+                                .buttonStyle(.plain)
+                                .font(.system(size:12,weight:.semibold))
+                                .foregroundStyle(game.difficulty == level ? Color.black : Color.white)
+                                .frame(width:78,height:28)
+                                .background(game.difficulty == level ? Color.cyan : Color(white:0.28))
+                                .clipShape(RoundedRectangle(cornerRadius:6))
+                                .overlay(RoundedRectangle(cornerRadius:6)
+                                    .strokeBorder(Color.white.opacity(0.30),lineWidth:1))
+                        }
+                    }
+                    Spacer()
+                    Text("GRAPHICS")
+                        .font(.system(size:10,weight:.bold,design:.monospaced))
+                        .foregroundStyle(.gray)
+                    HStack(spacing:3) {
+                        ForEach(VisualMode.allCases) { visual in
+                            Button(visual.rawValue) { game.mode=visual }
+                                .buttonStyle(.plain)
+                                .font(.system(size:12,weight:.semibold))
+                                .foregroundStyle(game.mode == visual ? Color.black : Color.white)
+                                .frame(width:88,height:28)
+                                .background(game.mode == visual ? Color.cyan : Color(white:0.28))
+                                .clipShape(RoundedRectangle(cornerRadius:6))
+                                .overlay(RoundedRectangle(cornerRadius:6)
+                                    .strokeBorder(Color.white.opacity(0.30),lineWidth:1))
+                        }
+                    }
                 }
-                Button("Resume") { savedBattles=BattleStore.list();showSaved=true }
-                Button(game.paused ? "Unpause" : "Pause") { game.togglePause() }
-                Button("New Game") { game.start() }
             }
-            .controlSize(.small).padding(.horizontal,16).frame(height:56)
-            .background(Color(red:0.055,green:0.085,blue:0.105))
+            .controlSize(.small)
+            .padding(.horizontal,20).padding(.vertical,10)
+            .background(Color(white:0.09))
             HStack(spacing: 0) {
                 GeometryReader { geometry in
                     Canvas { context,size in
@@ -1292,28 +1334,42 @@ private struct BarrageWindow: View {
                 BarrageTelemetry(game: game)
                     .frame(width: 205)
             }
-            HStack(spacing:20) {
+            HStack(spacing:12) {
                 Text("SCORE \(game.score)")
+                    .monospacedDigit()
                 Text("WAVE \(game.wave)")
+                    .monospacedDigit()
                 Text("CITIES \(game.alive)/6")
-                Spacer()
+                    .monospacedDigit()
+                Spacer(minLength:8)
+                Button(game.paused ? "Resume Play" : "Pause") { game.togglePause() }
+                    .help("P: pause or resume play")
+                Button("Supply Truck") { game.redistributeAmmo() }
+                    .help("T: redistribute ammunition between batteries")
+                Button("Nuclear") { game.launchNuclear() }
+                    .help("N: launch the selected battery nuclear interceptor")
+                Divider().frame(height:20)
                 ForEach(0..<3,id:\.self) { i in
                     Button("\(i+1): \(game.ammo[i])") { game.select(i) }
                         .buttonStyle(.bordered)
                         .tint(game.selected == i ? .cyan : .gray)
                 }
             }
-            .font(.system(size:12,weight:.bold,design:.monospaced))
-            .padding(.horizontal,18).frame(height:48)
-            .background(Color(red:0.05,green:0.08,blue:0.1))
-            HStack {
-                Text(game.message).foregroundStyle(.orange)
-                Spacer()
-                Text("DRAG FIRE STREAM   TAB BATTERY   T TRUCK   N NUCLEAR   P PAUSE")
-                    .foregroundStyle(.white.opacity(0.52))
+            .font(.system(size:11,weight:.semibold,design:.monospaced))
+            .padding(.horizontal,16).frame(height:48)
+            .background(Color(white:0.10))
+            HStack(spacing:12) {
+                Text("DRAG TO FIRE  •  TAB CHANGE BATTERY  •  T TRUCK  •  N NUCLEAR  •  P PAUSE  •  RETURN NEXT WAVE")
+                    .foregroundStyle(.white.opacity(0.75))
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                Spacer(minLength:6)
+                Text(game.message)
+                    .foregroundStyle(.orange)
+                    .lineLimit(1).minimumScaleFactor(0.75)
             }
-            .font(.system(size:10,weight:.semibold,design:.monospaced))
-            .padding(.horizontal,16).frame(height:30).background(.black)
+            .font(.system(size:10,weight:.medium,design:.monospaced))
+            .padding(.horizontal,16).frame(height:31)
+            .background(Color(white:0.075))
         }
         .onReceive(clock) { game.tick($0) }
         .sheet(isPresented:$showCustom) {
