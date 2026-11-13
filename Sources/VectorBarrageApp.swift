@@ -308,7 +308,7 @@ private final class BarrageGame: ObservableObject {
     private var pattern: AttackPattern = .wide
     private var lastWaveBatch = -1
     private var recovery = 0.0
-    private var gameSeconds = 0.0
+    private(set) var gameSeconds = 0.0
     private var lastIntercept = -100.0
     private var lastTick: Date?
     @Published var isFiringStream = false
@@ -1026,8 +1026,7 @@ private struct BarrageWindow: View {
                 let phase=Double(game.scenerySeed%997)*0.001+Double(layer)*1.7
                 // Broad ridges, intermediate peaks and very small uneven edges.
                 let broad=0.52*sin(x*12.7+phase)+0.31*sin(x*27.3-phase*1.4)
-                let peaks=0.19*abs(sin(x*49+phase*2.3))+
-                          0.10*sin(x*85-phase*0.7)
+                let peaks=0.19*abs(sin(x*49+phase*2.3)) + 0.10*sin(x*85-phase*0.7)
                 let altitude=base-amplitude*(broad+peaks)
                 ridge.addLine(to:CGPoint(x:w*CGFloat(x),y:h*CGFloat(altitude)))
             }
