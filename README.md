@@ -4,7 +4,7 @@ Native macOS missile-defense arcade game and fifth built-in Fun City cabinet.
 
 ## Current build
 
-**v1.2.3 — persistent high score**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
+**v1.2.4 — high score initials**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
 
 - Defend six cities using three selectable interceptor batteries.
 - Enemy missiles, expanding interception zones, chain-reaction scoring and splitting missiles in later waves.
@@ -154,3 +154,7 @@ The default values preserve the established game balance (15 missiles per batter
 ## v1.2.3 — high score
 
 The highest score achieved on this Mac is stored in local UserDefaults and displayed both in the score strip and the right telemetry panel. The record updates as soon as the current score exceeds it, including during a wave, and persists across new games and app restarts. Existing saved battles and named custom game setups remain independent of the record.
+
+## v1.2.4 — name the high-score holder
+
+After a new all-time high-score run ends, the player enters up to three uppercase initials. The initials persist locally beside the high-score value in both right-hand telemetry and the lower score strip. Existing numeric high scores remain valid and show `---` until a new record holder submits initials.
