@@ -992,10 +992,54 @@ private final class BarrageGame: ObservableObject {
     }
 }
 
+// Custom configurations are independent of in-progress battle snapshots.
+// Stored locally with Codable so every editable GameRules field is retained.
+private struct BarragePreset: Codable, Identifiable {
+    var id = UUID()
+    var name: String
+    var savedAt = Date()
+    var rules: GameRules
+    var mode: VisualMode
+    var difficulty: Difficulty
+}
+@MainActor
+private enum BarragePresetStore {
+    private static let key = "VectorBarrage.customPresets.v1"
+    static func all() -> [BarragePreset] {
+        guard let data=UserDefaults.standard.data(forKey:key),
+              let result=try? JSONDecoder().decode([BarragePreset].self,from:data) else { return [] }
+        return result.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+    static func save(_ preset: BarragePreset) {
+        var list=all()
+        if let existing=list.firstIndex(where: {
+            $0.name.compare(preset.name,options:[.caseInsensitive,.diacriticInsensitive]) == .orderedSame
+        }) {
+            list[existing]=BarragePreset(id:list[existing].id,name:preset.name,
+                                        savedAt:Date(),rules:preset.rules,
+                                        mode:preset.mode,difficulty:preset.difficulty)
+        } else {
+            list.append(preset)
+        }
+        if let bytes=try? JSONEncoder().encode(list) {
+            UserDefaults.standard.set(bytes,forKey:key)
+        }
+    }
+    static func delete(_ id: UUID) {
+        let updated=all().filter { $0.id != id }
+        if let bytes=try? JSONEncoder().encode(updated) {
+            UserDefaults.standard.set(bytes,forKey:key)
+        }
+    }
+}
+
 private struct CustomGameSettings: View {
     @Binding var rules: GameRules
     @Binding var mode: VisualMode
     @Binding var difficulty: Difficulty
+    @State private var presetName = ""
+    @State private var presets: [BarragePreset] = []
+    @State private var presetMessage = ""
     var onCancel: () -> Void
     var onApply: () -> Void
     private func counter(_ title:String,_ value:Binding<Int>,range:ClosedRange<Int>,step:Int=1) -> some View {
@@ -1022,8 +1066,72 @@ private struct CustomGameSettings: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Restore Defaults") { rules=GameRules();mode = .modern;difficulty = .veteran }
+                Button("Restore Defaults") {
+                    rules=GameRules();mode = .modern;difficulty = .veteran
+                    presetName="";presetMessage="Standard arcade defaults loaded"
+                }
             }.padding(20)
+            Divider()
+            VStack(alignment:.leading,spacing:8) {
+                HStack(spacing:10) {
+                    Text("SAVED CUSTOM SETUPS")
+                        .font(.system(size:10,weight:.bold,design:.monospaced))
+                        .foregroundStyle(.cyan)
+                    Spacer()
+                    Text("\(presets.count) SAVED")
+                        .font(.system(size:10,design:.monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing:8) {
+                    TextField("Name this setup",text:$presetName)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth:.infinity)
+                    Button("Save Setup") {
+                        let title=presetName.trimmingCharacters(in:.whitespacesAndNewlines)
+                        guard !title.isEmpty else {
+                            presetMessage="Enter a setup name first"
+                            return
+                        }
+                        BarragePresetStore.save(BarragePreset(name:title,rules:rules,
+                                                              mode:mode,difficulty:difficulty))
+                        presets=BarragePresetStore.all()
+                        presetMessage="Saved “\(title)”"
+                    }
+                    .disabled(presetName.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
+                }
+                if presets.isEmpty {
+                    Text("No custom setups saved yet. Adjust the rules and choose Save Setup.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    HStack(spacing:8) {
+                        Menu("Load Saved Setup") {
+                            ForEach(presets) { preset in
+                                Button(preset.name) {
+                                    rules=preset.rules;mode=preset.mode;difficulty=preset.difficulty
+                                    presetName=preset.name
+                                    presetMessage="Loaded “\(preset.name)” — choose Apply & Start to play"
+                                }
+                            }
+                        }
+                        Menu("Delete Setup") {
+                            ForEach(presets) { preset in
+                                Button(preset.name,role:.destructive) {
+                                    BarragePresetStore.delete(preset.id)
+                                    presets=BarragePresetStore.all()
+                                    if presetName == preset.name { presetName="" }
+                                    presetMessage="Deleted “\(preset.name)”"
+                                }
+                            }
+                        }
+                        Spacer()
+                    }
+                }
+                if !presetMessage.isEmpty {
+                    Text(presetMessage).font(.caption).foregroundStyle(.cyan)
+                }
+            }
+            .padding(.horizontal,20).padding(.vertical,12)
+            .background(Color(white:0.13))
             Divider()
             ScrollView {
                 Form {
@@ -1118,6 +1226,7 @@ private struct CustomGameSettings: View {
             }.padding(16)
         }
         .frame(width:680,height:740)
+        .onAppear { presets=BarragePresetStore.all() }
     }
 }
 
