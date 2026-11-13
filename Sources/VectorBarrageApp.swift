@@ -157,16 +157,16 @@ private final class BarrageGame: ObservableObject {
         for i in impacts.indices { impacts[i].age += dt }
         impacts.removeAll { $0.age >= 0.85 }
         if gameSeconds-lastIntercept > 2.4 { combo = 0 }
-        if recovery > 0 { recovery -= dt; return }
-        if spawned > 0 && spawned.isMultiple(of:6) && lastWaveBatch != spawned {
+        // Recovery pauses new arrivals, not the combat simulation.
+        if recovery > 0 { recovery = max(0,recovery-dt) }
+        if recovery == 0 && spawned > 0 && spawned.isMultiple(of:6) && lastWaveBatch != spawned {
             lastWaveBatch = spawned
             recovery = 1.2
             message = "NEXT FORMATION INBOUND"
-            return
         }
-        spawnTimer += dt
+        if recovery == 0 { spawnTimer += dt }
         let interval = max(0.36,difficulty.interval * pow(0.94,Double(wave-1)))
-        if spawned < quota && spawnTimer >= interval && hostiles.count < (difficulty == .ace ? 10 : 8) {
+        if recovery == 0 && spawned < quota && spawnTimer >= interval && hostiles.count < (difficulty == .ace ? 10 : 8) {
             spawnTimer -= interval
             spawnEnemy()
             spawned += 1
@@ -392,6 +392,30 @@ private struct BarrageWindow: View {
             ctx.stroke(bunker,with:.color(i == game.selected ? .white : cyan.opacity(0.7)),
                 lineWidth:i == game.selected ? 2.7 : 1.5)
         }
+        // Larger, short-lived impact signatures give immediate kill confirmation.
+        for fx in game.impacts {
+            let p = point(fx.point)
+            let life = max(0.0, 1.0-fx.age/0.85)
+            let radius = CGFloat(12 + fx.age * (fx.danger ? 65 : 48))
+            let ink: Color = fx.danger ? .red : .orange
+            ctx.stroke(Path(ellipseIn: CGRect(x:p.x-radius,y:p.y-radius,width:radius*2,height:radius*2)),
+                       with:.color(ink.opacity(life*0.8)),lineWidth:modern ? 2.8 : 1.6)
+            if modern {
+                for n in 0..<8 {
+                    let angle = Double(n)*Double.pi/4.0
+                    let reach = radius*(0.75+CGFloat(n%3)*0.15)
+                    let dot = CGPoint(x:p.x + CGFloat(cos(angle))*reach,
+                                      y:p.y + CGFloat(sin(angle))*reach)
+                    ctx.fill(Path(ellipseIn:CGRect(x:dot.x-1.6,y:dot.y-1.6,width:3.2,height:3.2)),
+                             with:.color((fx.danger ? Color.red : Color.yellow).opacity(life)))
+                }
+            }
+            if fx.points > 0 && fx.age < 0.65 {
+                ctx.draw(Text("+\(fx.points)").font(.system(size:13,weight:.bold,design:.monospaced))
+                    .foregroundColor(.white.opacity(life)),
+                    at:CGPoint(x:p.x,y:p.y-24-CGFloat(fx.age)*28))
+            }
+        }
         for missile in game.hostiles {
             line(point(missile.origin),point(missile.point),missile.splits ? .orange : .red,modern ? 1.7 : 1.2)
             let p=point(missile.point)
@@ -453,8 +477,16 @@ private struct BarrageTelemetry: View {
                     .font(.system(size: 9,design: .monospaced))
                     .foregroundStyle(muted)
                 Spacer().frame(height: 12)
+                label("ATTACK PATTERN")
+                Text(game.assault).font(.system(size:10,weight:.bold,design:.monospaced))
+                    .foregroundStyle(amber).lineLimit(1).padding(.bottom,7)
                 label("INCOMING THREATS")
                 big(String(format: "%02d",game.hostiles.count),size:21)
+                rule
+                label("BEST CHAIN / INTERCEPTS")
+                Text("\(game.bestCombo)  /  \(game.totalIntercepts)")
+                    .font(.system(size:12,weight:.semibold,design:.monospaced))
+                    .foregroundStyle(ice)
                 rule
                 label("INTERCEPTOR BATTERIES")
                 ForEach(0..<3,id: \.self) { i in
