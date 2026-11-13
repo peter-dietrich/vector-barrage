@@ -38,7 +38,7 @@ xcodebuild -project VectorBarrage.xcodeproj -scheme VectorBarrage -destination '
 | --- | --- |
 | Return | Start / advance to the next wave / restart after game over |
 | Mouse click | Fire an interceptor at the clicked location |
-| 1 / 2 / 3 (or A / S / D) | Select left / center / right battery |
+| Control (tap) | Cycle left → center → right → left battery |
 | Space | Fire at the last cursor location |
 | P | Pause / resume |
 | R | Start a new game |
