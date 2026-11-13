@@ -33,6 +33,7 @@ private struct Hostile: Identifiable, Codable {
     var hasSplit = false
     // Optional for compatibility with pre-meteor saved battles.
     var meteorFragment: Bool? = nil
+    var ignoredInitialBursts: [UUID]? = nil
 }
 private struct Meteor: Identifiable, Codable {
     var id = UUID()
@@ -751,7 +752,9 @@ private final class BarrageGame: ObservableObject {
         // to other simultaneous kills or a shockwave from a destroyed missile.
         for missile in hostiles {
             if let index = bursts.firstIndex(where: {
-                !$0.hostile && $0.radius > 0 && missile.point.distance($0.point) <= $0.radius
+                !$0.hostile && $0.radius > 0 &&
+                !(missile.ignoredInitialBursts ?? []).contains($0.id) &&
+                missile.point.distance($0.point) <= $0.radius
             }) {
                 removed.insert(missile.id)
                 kills.append(missile)
@@ -888,7 +891,8 @@ private final class BarrageGame: ObservableObject {
             let aim=Point2(x:max(0.04,min(0.96,meteor.target.x+offset)),y:ground)
             hostiles.append(Hostile(origin:meteor.point,point:meteor.point,
                 target:aim,speed:min(0.19,meteor.speed*2.4),
-                splits:false,hasSplit:false,meteorFragment:true))
+                splits:false,hasSplit:false,meteorFragment:true,
+                ignoredInitialBursts:bursts.filter { !$0.hostile }.map(\.id)))
         }
     }
     private func spawnEnemy() {
