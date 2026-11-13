@@ -4,7 +4,7 @@ Native macOS missile-defense arcade game and fifth built-in Fun City cabinet.
 
 ## Current build
 
-**v1.1.0 — armored meteors and fragmentation threats**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
+**v1.1.1 — ammunition progression**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
 
 - Defend six cities using three selectable interceptor batteries.
 - Enemy missiles, expanding interception zones, chain-reaction scoring and splitting missiles in later waves.
@@ -113,3 +113,9 @@ An original game inspired by the classic missile-defense arcade genre. No Atari/
 - Waves **3–5 feature one meteor per wave**. Wave 6 onward retains at least one meteor, with increasing random chances of a second (and an occasional third on much later waves).
 - Meteors and unneutralized fragments can destroy surviving cities. Wave completion waits for all scheduled meteors and their fragments to resolve.
 - Meteor health, hit-blast IDs, active meteor positions, and wave scheduling are included in saved battles. Earlier saves remain readable.
+
+## v1.1.1 ammunition progression
+
+- Default loadout increased from **12 to 15** interceptors per battery in wave 1.
+- Each new wave adds **2 more rounds per battery** to the replenished loadout: wave 1 = 15, wave 2 = 17, wave 3 = 19, etc. The formula also applies to Custom Games starting in higher waves, using the custom starting ammunition as the wave-1 base.
+- Low ammunition warnings continue to trigger at 20% of each wave's loadout. Saved battles retain their actual remaining rounds.
