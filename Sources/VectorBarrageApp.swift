@@ -1488,18 +1488,100 @@ private struct BarrageWindow: View {
                     at:CGPoint(x:p.x,y:p.y-24-CGFloat(fx.age)*28))
             }
         }
+        // A three-stage armored meteor with irregular, rotating, cratered rock
+        // geometry, orange heat wake and clear 3/2/1 damage ticks.
+        for meteor in game.meteors {
+            let p=point(meteor.point)
+            let direction=meteor.target
+            let delta=CGVector(dx:direction.x-meteor.point.x,dy:direction.y-meteor.point.y)
+            let mag=max(0.00001,hypot(delta.dx,delta.dy))
+            let heatTail=CGPoint(x:p.x-CGFloat(delta.dx/mag)*43,
+                                 y:p.y-CGFloat(delta.dy/mag)*43)
+            line(heatTail,p,Color.orange.opacity(0.64),4.5)
+            var rockCtx=ctx
+            rockCtx.translateBy(x:p.x,y:p.y)
+            rockCtx.rotate(by:.radians(meteor.rotation))
+            var rock=Path()
+            let sides=11
+            for i in 0..<sides {
+                let angle=Double(i)*2*Double.pi/Double(sides)
+                let radius=CGFloat(23+(i*17%11)-5)
+                let v=CGPoint(x:cos(angle)*radius,y:sin(angle)*radius)
+                if i == 0 { rock.move(to:v) } else { rock.addLine(to:v) }
+            }
+            rock.closeSubpath()
+            rockCtx.fill(rock,with:.color(Color(red:0.30,green:0.29,blue:0.34)))
+            rockCtx.stroke(rock,with:.color(meteor.health == 1 ? .orange : .white.opacity(0.85)),
+                          lineWidth:meteor.health == 1 ? 3 : 1.8)
+            for i in 0..<6 {
+                let a=Double(i)*Double.pi/3
+                let center=CGPoint(x:CGFloat(cos(a))*11,y:CGFloat(sin(a))*11)
+                let r=CGFloat(3+i%3)
+                rockCtx.stroke(Path(ellipseIn:CGRect(x:center.x-r,y:center.y-r,
+                              width:r*2,height:r*2)),
+                              with:.color(Color.black.opacity(0.58)),lineWidth:1.8)
+            }
+            // Cracks grow as armor is stripped.
+            if meteor.health < 3 {
+                var crack=Path()
+                crack.move(to:CGPoint(x:-17,y:-10))
+                crack.addLine(to:CGPoint(x:-5,y:-3))
+                crack.addLine(to:CGPoint(x:1,y:7))
+                crack.addLine(to:CGPoint(x:18,y:13))
+                rockCtx.stroke(crack,with:.color(.orange),lineWidth:meteor.health == 1 ? 3 : 1.7)
+            }
+            for i in 0..<3 {
+                let x=p.x+CGFloat(i-1)*13
+                let dot=CGRect(x:x-4,y:p.y-40,width:8,height:8)
+                ctx.fill(Path(ellipseIn:dot),
+                    with:.color(i < meteor.health ? .orange : Color.white.opacity(0.2)))
+                ctx.stroke(Path(ellipseIn:dot),with:.color(.white.opacity(0.55)),lineWidth:0.8)
+            }
+            ctx.draw(Text("METEOR")
+                .font(.system(size:10,weight:.heavy,design:.monospaced))
+                .foregroundColor(.orange),
+                at:CGPoint(x:p.x,y:p.y-57))
+        }
+        for breakup in game.meteorBreakups {
+            let p=point(breakup.point)
+            let fade=max(0,1-breakup.age/1.7)
+            let radius=CGFloat(18+breakup.age*124)
+            let ring=Path(ellipseIn:CGRect(x:p.x-radius,y:p.y-radius,
+                                           width:radius*2,height:radius*2))
+            ctx.stroke(ring,with:.color(.white.opacity(fade)),lineWidth:4)
+            ctx.fill(ring,with:.color(Color.orange.opacity(fade*0.11)))
+            for i in 0..<27 {
+                let a=Double(i)*Double.pi*2/27
+                let spread=CGFloat(10+breakup.age*Double(40+(i*19)%91))
+                let fragment=CGPoint(x:p.x+cos(a)*spread,y:p.y+sin(a)*spread)
+                let piece=Path(ellipseIn:CGRect(x:fragment.x-3,y:fragment.y-3,
+                                                 width:6,height:6))
+                ctx.fill(piece,with:.color((i.isMultiple(of:3) ? Color.white : .orange).opacity(fade)))
+            }
+        }
         for missile in game.hostiles {
             let p=point(missile.point)
             let source=point(missile.origin)
             let delta=CGVector(dx:p.x-source.x,dy:p.y-source.y)
             let length=max(1,hypot(delta.dx,delta.dy))
             let ux=delta.dx/length, uy=delta.dy/length
-            let ink:Color=missile.splits ? .orange : .red
+            let ink:Color=missile.meteorFragment == true ? .yellow :
+                            (missile.splits ? .orange : .red)
             line(source,p,ink.opacity(0.55),modern ? 1.5 : 1.2)
             let tail=CGPoint(x:p.x-ux*26,y:p.y-uy*26)
             line(tail,p,ink,modern ? 3 : 1.6)
             if modern {
                 line(CGPoint(x:p.x-ux*13,y:p.y-uy*13),p,.white.opacity(0.82),1.3)
+                if missile.meteorFragment == true {
+                    var shard=Path()
+                    shard.move(to:CGPoint(x:p.x+ux*9,y:p.y+uy*9))
+                    shard.addLine(to:CGPoint(x:p.x-uy*7-ux*5,y:p.y+ux*7-uy*5))
+                    shard.addLine(to:CGPoint(x:p.x+uy*5-ux*8,y:p.y-ux*5-uy*8))
+                    shard.closeSubpath()
+                    ctx.fill(shard,with:.color(Color(red:0.78,green:0.44,blue:0.17)))
+                    ctx.stroke(shard,with:.color(.yellow),lineWidth:1.1)
+                    continue
+                }
                 // Sharp arrowhead / fins, clearly distinguish MIRVs.
                 var body=Path()
                 body.move(to:CGPoint(x:p.x+ux*7,y:p.y+uy*7))
@@ -1545,6 +1627,11 @@ private struct BarrageWindow: View {
             let ring=Path(ellipseIn:CGRect(x:p.x-r,y:p.y-r,width:2*r,height:2*r))
             ctx.fill(ring,with:.color((blast.hostile ? orange : cyan).opacity(modern ? 0.16 : 0.09)))
             ctx.stroke(ring,with:.color(blast.hostile ? orange : .white),lineWidth:modern ? 2.8 : 1.7)
+        }
+        if game.meteorFlash > 0 {
+            ctx.fill(Path(CGRect(x:0,y:0,width:w,height:h)),
+                     with:.color(.white.opacity(game.meteorFlash*
+                          (game.rules.reducedFlash ? 0.20 : 0.62))))
         }
         if modern && game.battlePulse > 0 {
             let danger=game.impacts.contains(where: { $0.danger && $0.age < 0.24 })
@@ -1630,6 +1717,18 @@ private struct BarrageTelemetry: View {
                 label("ATTACK PATTERN")
                 Text(game.assault).font(.system(size:10,weight:.bold,design:.monospaced))
                     .foregroundStyle(amber).lineLimit(1).padding(.bottom,7)
+                if !game.meteors.isEmpty {
+                    HStack(spacing:4) {
+                        Image(systemName:"bolt.fill")
+                        Text("METEOR THREAT  ×\(game.meteors.count)")
+                    }
+                    .font(.system(size:10,weight:.heavy,design:.monospaced))
+                    .foregroundStyle(.orange)
+                    Text("3 HITS TO BREAK • FRAGMENTS")
+                        .font(.system(size:9,design:.monospaced))
+                        .foregroundStyle(muted)
+                        .padding(.bottom,5)
+                }
                 label("INCOMING THREATS")
                 big(String(format: "%02d",game.hostiles.count),size:21)
                 rule
