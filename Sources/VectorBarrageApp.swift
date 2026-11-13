@@ -207,7 +207,7 @@ private struct BarrageWindow: View {
         VStack(spacing:0) {
             HStack(spacing:14) {
                 Text("VECTOR BARRAGE").font(.system(size:16,weight:.heavy,design:.monospaced)).tracking(2)
-                Text("v0.1.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
+                Text("v0.2.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
                 Spacer()
                 Picker("Display",selection:$game.mode) {
                     ForEach(VisualMode.allCases) { Text($0.rawValue).tag($0) }
@@ -220,20 +220,24 @@ private struct BarrageWindow: View {
             }
             .controlSize(.small).padding(.horizontal,16).frame(height:56)
             .background(Color(red:0.055,green:0.085,blue:0.105))
-            GeometryReader { geometry in
-                Canvas { context,size in
-                    draw(context:context,size:size)
+            HStack(spacing: 0) {
+                GeometryReader { geometry in
+                    Canvas { context,size in
+                        draw(context:context,size:size)
+                    }
+                    .background(Color(red:0.015,green:0.024,blue:0.052))
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance:0).onChanged { value in
+                        game.aim = Point2(x:Double(value.location.x/max(1,geometry.size.width)),
+                            y:Double(value.location.y/max(1,geometry.size.height)))
+                    }.onEnded { value in
+                        game.fire(Point2(x:Double(value.location.x/max(1,geometry.size.width)),
+                            y:Double(value.location.y/max(1,geometry.size.height))))
+                    })
+                    .overlay(KeyboardCapture(onKey:game.key, onControlPress:game.cycleBattery).allowsHitTesting(false))
                 }
-                .background(Color(red:0.015,green:0.024,blue:0.052))
-                .contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance:0).onChanged { value in
-                    game.aim = Point2(x:Double(value.location.x/max(1,geometry.size.width)),
-                        y:Double(value.location.y/max(1,geometry.size.height)))
-                }.onEnded { value in
-                    game.fire(Point2(x:Double(value.location.x/max(1,geometry.size.width)),
-                        y:Double(value.location.y/max(1,geometry.size.height))))
-                })
-                .overlay(KeyboardCapture(onKey:game.key, onControlPress:game.cycleBattery).allowsHitTesting(false))
+                BarrageTelemetry(game: game)
+                    .frame(width: 205)
             }
             HStack(spacing:20) {
                 Text("SCORE \(game.score)")
@@ -283,6 +287,26 @@ private struct BarrageWindow: View {
             }
         }
         let ground=h*0.88
+        if modern {
+            // Procedural atmospheric terrain is purposely confined to the lowest
+            // sky band; no bright edges or moving scenery compete with targets.
+            let back = [0.825,0.821,0.814,0.82,0.802,0.811,0.806,0.823,0.816,0.828]
+            let middle = [0.852,0.849,0.836,0.844,0.828,0.839,0.831,0.846,0.838,0.852]
+            func terrain(_ heights: [Double], color: Color) {
+                var p = Path()
+                p.move(to: CGPoint(x:0,y:ground))
+                for (i,y) in heights.enumerated() {
+                    p.addLine(to: CGPoint(x:w*CGFloat(i)/CGFloat(heights.count-1),y:h*y))
+                }
+                p.addLine(to: CGPoint(x:w,y:ground))
+                p.closeSubpath()
+                ctx.fill(p,with:.color(color))
+            }
+            terrain(back,color:Color(red:0.13,green:0.22,blue:0.29).opacity(0.22))
+            terrain(middle,color:Color(red:0.09,green:0.15,blue:0.22).opacity(0.32))
+            // The horizon line is present but deliberately barely perceptible.
+            line(CGPoint(x:0,y:h*0.82),CGPoint(x:w,y:h*0.82),cyan.opacity(0.055),0.7)
+        }
         line(CGPoint(x:0,y:ground),CGPoint(x:w,y:ground),cyan,2)
         for i in 0..<6 {
             let x=w*game.cityLocations[i]
@@ -339,6 +363,82 @@ private struct BarrageWindow: View {
             ctx.draw(Text(sub).font(.system(size:15,weight:.bold,design:.monospaced)).foregroundColor(cyan),
                 at:CGPoint(x:w/2,y:h*0.43))
         }
+    }
+}
+
+private struct BarrageTelemetry: View {
+    @ObservedObject var game: BarrageGame
+    private let amber = Color(red: 1, green: 0.72, blue: 0.40)
+    private let ice = Color(red: 0.72, green: 0.91, blue: 1)
+    private let muted = Color.white.opacity(0.60)
+
+    var body: some View {
+        GeometryReader { geo in
+            // Vector Drift's compact hierarchy: amber micro-labels, large
+            // right-aligned numbers, thin rules and understated glass.
+            VStack(alignment: .trailing, spacing: 0) {
+                Text("VECTOR BARRAGE  //  TELEMETRY")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(amber)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                Spacer().frame(height: 15)
+                label("CURRENT SCORE")
+                big(String(format: "%06d",game.score),size:28)
+                rule
+                label("CURRENT WAVE")
+                big(String(format: "%02d",game.wave),size:28)
+                rule
+                label("DEFENSE STATUS")
+                big(String(format: "%02d / 06",game.alive),size:21)
+                Text("CITIES OPERATIONAL")
+                    .font(.system(size: 9,design: .monospaced))
+                    .foregroundStyle(muted)
+                Spacer().frame(height: 12)
+                label("INCOMING THREATS")
+                big(String(format: "%02d",game.hostiles.count),size:21)
+                rule
+                label("INTERCEPTOR BATTERIES")
+                ForEach(0..<3,id: \.self) { i in
+                    HStack(spacing: 6) {
+                        Text(["LEFT", "CENTER", "RIGHT"][i])
+                            .foregroundStyle(game.selected == i ? amber : muted)
+                        Spacer(minLength: 1)
+                        Text(String(format:"%02d",game.ammo[i]))
+                            .foregroundStyle(game.selected == i ? ice : .white)
+                    }
+                    .font(.system(size: 11,weight: game.selected == i ? .bold : .regular,design:.monospaced))
+                    .padding(.top,6)
+                }
+                Spacer(minLength: 9)
+                Text(game.difficulty.rawValue.uppercased() + "  /  " + game.mode.rawValue.uppercased())
+                    .font(.system(size:9,design:.monospaced)).foregroundStyle(muted)
+                Text(game.paused ? "SYSTEM PAUSED" : game.waiting ? "WAVE COMPLETE" : game.running ? "DEFENSE ONLINE" : "STANDBY")
+                    .font(.system(size:9,weight:.semibold,design:.monospaced))
+                    .foregroundStyle(amber)
+                    .padding(.top,5)
+            }
+            .frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topTrailing)
+            .padding(.horizontal,14)
+            .padding(.vertical,16)
+            .background(Color(red:0.035,green:0.085,blue:0.13).opacity(0.64))
+            .overlay(alignment:.leading) { Rectangle().fill(amber.opacity(0.40)).frame(width:2).padding(.vertical,12) }
+            .overlay(Rectangle().strokeBorder(ice.opacity(0.13),lineWidth:0.7))
+            .scaleEffect(min(1, max(0.78, geo.size.height/490)),anchor:.topTrailing)
+        }
+    }
+    private func label(_ value:String) -> some View {
+        Text(value)
+            .font(.system(size:9,weight:.medium,design:.monospaced))
+            .foregroundStyle(muted)
+            .padding(.bottom,3)
+    }
+    private func big(_ value:String,size:CGFloat) -> some View {
+        Text(value).font(.system(size:size,weight:.bold,design:.monospaced))
+            .monospacedDigit().foregroundStyle(ice)
+    }
+    private var rule: some View {
+        Rectangle().fill(ice.opacity(0.18)).frame(height:0.7)
+            .padding(.vertical,13)
     }
 }
 
