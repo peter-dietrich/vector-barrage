@@ -44,7 +44,15 @@ private struct Burst: Identifiable, Codable {
     var age = 0.0
     var maxRadius: Double
     var hostile: Bool
+    // Optional to preserve decoding of save slots created before v0.6.
+    var interceptionCount: Int? = nil
     var radius: Double { maxRadius * max(0, sin(min(1, age/1.05) * .pi)) }
+}
+private struct TripleBonusFX: Identifiable {
+    let id = UUID()
+    var count: Int
+    var points: Int
+    var age = 0.0
 }
 private struct LaunchFX: Identifiable, Codable {
     let id = UUID()
@@ -137,6 +145,8 @@ private final class ArcadeAudio {
         case "launch": duration=0.17;freq=690;volume=0.22
         case "hit": duration=0.28;freq=390;volume=0.32
         case "chain": duration=0.46;freq=550;volume=0.43
+        case "triple": duration=0.72;freq=850;volume=0.51
+        case "alert": duration=0.24;freq=290;volume=0.30
         case "city": duration=1.5;freq=75;volume=0.70
         case "wave": duration=0.65;freq=620;volume=0.30
         default: duration=0.12;freq=250;volume=0.20
@@ -190,6 +200,8 @@ private final class BarrageGame: ObservableObject {
     @Published var impacts: [ImpactFX] = []
     @Published var launches: [LaunchFX] = []
     @Published var nuclear: [NuclearFX] = []
+    @Published var tripleBonus: TripleBonusFX?
+    private var lastAlertTone = -100.0
     @Published var rules = GameRules()
     private let audio = ArcadeAudio()
     @Published var battlePulse = 0.0
@@ -224,10 +236,23 @@ private final class BarrageGame: ObservableObject {
     private var lastIntercept = -100.0
     private var lastTick: Date?
     var alive: Int { cities.filter { $0 }.count }
+    // A warning applies only to an active city target and the LAST 10% of
+    // that missile's own trajectory, including split child missiles.
+    var criticalThreatCount: Int {
+        hostiles.filter { missile in
+            let targetActive = cityLocations.indices.contains { index in
+                cities[index] && abs(cityLocations[index]-missile.target.x) < 0.09
+            }
+            let full = missile.origin.distance(missile.target)
+            return targetActive && full > 0 &&
+                missile.point.distance(missile.target) / full <= 0.10
+        }.count
+    }
+    var proximityPulseOn: Bool { Int(gameSeconds*3).isMultiple(of:2) }
 
     func start() {
         hostiles = []; defenses = []; bursts = []; launches = []
-        hitStreak = 0; battlePulse = 0
+        hitStreak = 0; battlePulse = 0; tripleBonus = nil; lastAlertTone = -100
         cities = Array(repeating: true, count: 6)
         score = 0; wave = max(1,min(20,rules.startingWave)); selected = 1
         combo = 0; bestCombo = 0; totalIntercepts = 0; gameSeconds = 0
@@ -236,7 +261,7 @@ private final class BarrageGame: ObservableObject {
     }
     private func nextWave() {
         hostiles = []; defenses = []; bursts = []; impacts = []; launches = []
-        hitStreak = 0; battlePulse = 0
+        hitStreak = 0; battlePulse = 0; tripleBonus = nil; lastAlertTone = -100
         ammo = Array(repeating: max(4,min(30,rules.batteryAmmo)),count:3)
         spawned = 0; spawnTimer = 0; recovery = 1.4; lastWaveBatch = -1
         pattern = wave < 2 ? .wide : [.wide,.flank,.cluster,.mirv][(wave-1)%4]
@@ -285,6 +310,14 @@ private final class BarrageGame: ObservableObject {
         }
         guard running && !paused && !waiting else { return }
         gameSeconds += dt
+        if tripleBonus != nil {
+            tripleBonus!.age += dt
+            if tripleBonus!.age >= 1.65 { tripleBonus = nil }
+        }
+        if criticalThreatCount > 0 && gameSeconds-lastAlertTone >= 1.25 {
+            lastAlertTone=gameSeconds
+            audio.play("alert",enabled:rules.soundEnabled)
+        }
         battlePulse = max(0,battlePulse-dt*2.3)
         for i in launches.indices { launches[i].age += dt }
         launches.removeAll { $0.age >= 0.28 }
@@ -332,10 +365,24 @@ private final class BarrageGame: ObservableObject {
         var removed = Set<UUID>()
         // A defensive explosion may destroy any number of missiles: chain reaction scoring.
         var kills: [Hostile] = []
+        var blastBonuses: [(count:Int, points:Int)] = []
+        // Credit each missile to precisely ONE active interceptor blast, not
+        // to other simultaneous kills or a shockwave from a destroyed missile.
         for missile in hostiles {
-            if bursts.contains(where: { !$0.hostile && $0.radius > 0 && missile.point.distance($0.point) <= $0.radius }) {
+            if let index = bursts.firstIndex(where: {
+                !$0.hostile && $0.radius > 0 && missile.point.distance($0.point) <= $0.radius
+            }) {
                 removed.insert(missile.id)
                 kills.append(missile)
+                bursts[index].interceptionCount = (bursts[index].interceptionCount ?? 0) + 1
+                let count = bursts[index].interceptionCount ?? 0
+                if count == 3 {
+                    // Once per interceptor blast upon the third incoming missile.
+                    blastBonuses.append((count,300))
+                } else if count > 3 {
+                    // Modest extra reward for each additional intercept.
+                    blastBonuses.append((count,100))
+                }
                 bursts.append(Burst(point:missile.point,maxRadius:0.032,hostile:true))
             } else if missile.point.y >= ground-0.00001 {
                 removed.insert(missile.id)
@@ -369,6 +416,15 @@ private final class BarrageGame: ObservableObject {
             audio.play(kills.count >= 2 ? "chain" : "hit",enabled:rules.soundEnabled)
             message = kills.count >= 3 ? "CHAIN REACTION ×\(kills.count) — COMBO \(combo)" :
                 kills.count == 2 ? "DOUBLE INTERCEPT — COMBO \(combo)" : "INTERCEPT CONFIRMED"
+        }
+        if !blastBonuses.isEmpty {
+            let bonus = blastBonuses.reduce(0) { $0 + $1.points }
+            let count = blastBonuses.map(\.count).max() ?? 3
+            score += bonus
+            tripleBonus = TripleBonusFX(count:count,points:bonus)
+            battlePulse = max(battlePulse,0.35)
+            audio.play("triple",enabled:rules.soundEnabled)
+            message = "MULTI-INTERCEPT ×\(count)  +\(bonus) BONUS"
         }
         hostiles.removeAll { removed.contains($0.id) }
         if alive == 0 {
@@ -404,7 +460,8 @@ private final class BarrageGame: ObservableObject {
         pattern=b.pattern;assault=b.pattern.rawValue
         lastWaveBatch=b.lastWaveBatch;recovery=b.recovery
         gameSeconds=b.gameSeconds;lastIntercept=b.lastIntercept
-        impacts=[];launches=[];nuclear=[];battlePulse=0;hitStreak=0
+        impacts=[];launches=[];nuclear=[];tripleBonus=nil;lastAlertTone=-100
+        battlePulse=0;hitStreak=0
         lastTick=nil;paused=true
         message="RESTORED — PRESS P TO CONTINUE"
     }
@@ -439,7 +496,7 @@ private struct BarrageWindow: View {
         VStack(spacing:0) {
             HStack(spacing:14) {
                 Text("VECTOR BARRAGE").font(.system(size:16,weight:.heavy,design:.monospaced)).tracking(2)
-                Text("v0.5.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
+                Text("v0.6.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
                 Spacer()
                 Picker("Display",selection:$game.mode) {
                     ForEach(VisualMode.allCases) { Text($0.rawValue).tag($0) }
@@ -835,6 +892,24 @@ private struct BarrageWindow: View {
             ctx.fill(Path(CGRect(x:0,y:0,width:w,height:h)),
                      with:.color((danger ? Color.red : Color.white).opacity(game.battlePulse*0.14)))
         }
+        if let bonus = game.tripleBonus {
+            let remaining = max(0,1-bonus.age/1.65)
+            let emphasis = CGFloat(1 + 0.13*max(0,1-bonus.age/0.25))
+            let center=CGPoint(x:w*0.50,y:h*0.22)
+            let banner=CGRect(x:center.x-180,y:center.y-46,width:360,height:94)
+            ctx.fill(Path(roundedRect:banner,cornerRadius:10),
+                     with:.color(Color.black.opacity(remaining*0.72)))
+            ctx.stroke(Path(roundedRect:banner,cornerRadius:10),
+                       with:.color(Color.orange.opacity(remaining*0.9)),lineWidth:2.5)
+            ctx.draw(Text("×\(bonus.count) MULTI-INTERCEPT")
+                     .font(.system(size:CGFloat(25)*emphasis,weight:.black,design:.monospaced))
+                     .foregroundColor(.white.opacity(remaining)),
+                     at:CGPoint(x:center.x,y:center.y-14))
+            ctx.draw(Text("+\(bonus.points) BONUS")
+                     .font(.system(size:20,weight:.heavy,design:.monospaced))
+                     .foregroundColor(.yellow.opacity(remaining)),
+                     at:CGPoint(x:center.x,y:center.y+22))
+        }
         let cursor=point(game.aim)
         line(CGPoint(x:cursor.x-12,y:cursor.y),CGPoint(x:cursor.x-4,y:cursor.y),cyan)
         line(CGPoint(x:cursor.x+4,y:cursor.y),CGPoint(x:cursor.x+12,y:cursor.y),cyan)
@@ -897,15 +972,37 @@ private struct BarrageTelemetry: View {
                 rule
                 label("INTERCEPTOR BATTERIES")
                 ForEach(0..<3,id: \.self) { i in
-                    HStack(spacing: 6) {
+                    HStack(spacing: 5) {
                         Text(["LEFT", "CENTER", "RIGHT"][i])
+                            .font(.system(size:13,weight:game.selected == i ? .bold : .medium,
+                                          design:.monospaced))
                             .foregroundStyle(game.selected == i ? amber : muted)
                         Spacer(minLength: 1)
                         Text(String(format:"%02d",game.ammo[i]))
+                            .font(.system(size:18,weight:.bold,design:.monospaced))
+                            .monospacedDigit()
                             .foregroundStyle(game.selected == i ? ice : .white)
                     }
-                    .font(.system(size: 11,weight: game.selected == i ? .bold : .regular,design:.monospaced))
-                    .padding(.top,6)
+                    .padding(.top,7)
+                }
+                if game.criticalThreatCount > 0 {
+                    VStack(alignment:.trailing,spacing:3) {
+                        HStack(spacing:4) {
+                            Image(systemName:"exclamationmark.triangle.fill")
+                            Text("PROXIMITY ALERT")
+                        }
+                        .font(.system(size:12,weight:.black,design:.monospaced))
+                        Text("\(game.criticalThreatCount) MISSILE(S) / FINAL 10%")
+                            .font(.system(size:10,weight:.bold,design:.monospaced))
+                    }
+                    .foregroundStyle(game.proximityPulseOn ? Color.white : Color.red)
+                    .frame(maxWidth:.infinity,alignment:.trailing)
+                    .padding(.vertical,8).padding(.horizontal,7)
+                    .background(Color.red.opacity(game.proximityPulseOn ? 0.65 : 0.28),
+                                in:RoundedRectangle(cornerRadius:5))
+                    .overlay(RoundedRectangle(cornerRadius:5).stroke(Color.red,lineWidth:1))
+                    .padding(.top,13)
+                    .accessibilityLabel("Proximity alert: \(game.criticalThreatCount) missiles in final ten percent")
                 }
                 Spacer(minLength: 9)
                 Text(game.difficulty.rawValue.uppercased() + "  /  " + game.mode.rawValue.uppercased())
