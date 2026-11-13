@@ -24,7 +24,7 @@ private struct Point2: Codable {
     }
 }
 private struct Hostile: Identifiable, Codable {
-    let id = UUID()
+    var id = UUID()
     var origin: Point2
     var point: Point2
     var target: Point2
@@ -33,13 +33,13 @@ private struct Hostile: Identifiable, Codable {
     var hasSplit = false
 }
 private struct Defense: Identifiable, Codable {
-    let id = UUID()
+    var id = UUID()
     var origin: Point2
     var point: Point2
     var target: Point2
 }
 private struct Burst: Identifiable, Codable {
-    let id = UUID()
+    var id = UUID()
     var point: Point2
     var age = 0.0
     var maxRadius: Double
@@ -49,25 +49,25 @@ private struct Burst: Identifiable, Codable {
     var radius: Double { maxRadius * max(0, sin(min(1, age/1.05) * .pi)) }
 }
 private struct TripleBonusFX: Identifiable {
-    let id = UUID()
+    var id = UUID()
     var count: Int
     var points: Int
     var age = 0.0
 }
 private struct LaunchFX: Identifiable, Codable {
-    let id = UUID()
+    var id = UUID()
     var point: Point2
     var age = 0.0
 }
 private struct ImpactFX: Identifiable, Codable {
-    let id = UUID()
+    var id = UUID()
     var point: Point2
     var age = 0.0
     var danger: Bool
     var points: Int
 }
 private struct NuclearFX: Identifiable, Codable {
-    let id = UUID()
+    var id = UUID()
     var point: Point2
     var age = 0.0
 }
@@ -460,7 +460,7 @@ private final class BarrageGame: ObservableObject {
         pattern=b.pattern;assault=b.pattern.rawValue
         lastWaveBatch=b.lastWaveBatch;recovery=b.recovery
         gameSeconds=b.gameSeconds;lastIntercept=b.lastIntercept
-        impacts=[];launches=[];nuclear=[];tripleBonus=nil;lastAlertTone=-100
+        impacts=[];launches=[];nuclear=[];tripleBonus=nil;lastAlertTone = -100
         battlePulse=0;hitStreak=0
         lastTick=nil;paused=true
         message="RESTORED — PRESS P TO CONTINUE"
