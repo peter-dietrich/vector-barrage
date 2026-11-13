@@ -4,7 +4,7 @@ Native macOS missile-defense arcade game and fifth built-in Fun City cabinet.
 
 ## Current build
 
-**v0.6.0 — critical proximity warning and multi-intercept bonuses**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
+**v0.7.0 — logistics, nuclear interception and stealth bombers**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
 
 - Defend six cities using three selectable interceptor batteries.
 - Enemy missiles, expanding interception zones, chain-reaction scoring and splitting missiles in later waves.
@@ -23,7 +23,7 @@ Native macOS missile-defense arcade game and fifth built-in Fun City cabinet.
 - Custom Game lets you choose starting wave, missiles per wave, interceptor ammo, incoming speed, sounds and reduced flash. Applying rules starts a fresh game.
 - Save Game and Resume retain up to five local battle snapshots via UserDefaults. Restored battles pause until P is pressed.
 - Cities render 10% larger. Destroyed cities produce a mushroom cloud, expanding blast and full-playfield white flash; reduced-flash mode decreases brightness.
-- Critical red flashing alert in right telemetry when any missile targeting a standing city has 10% or less of its trajectory remaining; includes count and an intermittent warning sound.
+- Critical red flashing alert in right telemetry when any missile targeting a standing city has **25% or less** of its trajectory remaining; includes count and an intermittent warning sound.
 - Larger battery selection labels and ammunition figures in telemetry.
 - Each defensive blast awards an extra 300 points upon its third unique missile kill and 100 more for each additional missile; large on-screen combo bonus banner and unique sound. Counts belong to one interceptor explosion, not simultaneous independent explosions. Existing local saves remain readable.
 - Bundle identifier: `io.vectorbarrage.game`.
@@ -70,3 +70,13 @@ A downloadable signed game is not published yet. Fun City's **DOWNLOAD GAME** ac
 ## Intellectual property
 
 An original game inspired by the classic missile-defense arcade genre. No Atari/Missile Command imagery or audio was copied.
+
+## v0.7.0 additions
+
+- **T** dispatches a visible supply truck that travels left → center → right in three seconds. On arrival, it evenly redistributes all ammunition still in the three batteries, preserving the total rounds. It does not manufacture ammunition.
+- **N** fires the selected battery's one-use nuclear interceptor (3 total per battle). The center interceptor rises vertically to approximately mid-screen; flank interceptors angle 20 degrees inward. Each blast eliminates approximately one third of the missiles inbound at detonation and awards 45 points per intercepted missile. No launch if the inbound list is empty. Nuke status is displayed in the right telemetry.
+- From wave 2, flying-wing stealth bomber encounters recur on an interval. Bomber can deploy missiles and can be destroyed by defensive blast zones; destruction gives +450 points, a large animated explosion, screen shake and sound. Original procedural aircraft drawing, no licensed artwork.
+- New logistics/airborne indicators in right telemetry. Save-game snapshots include the new persistent gameplay state where available and older slots remain readable.
+- Full flash and shake are reduced in the custom game's reduced-flash option.
+
+**New controls**: T redistribute ammo; N launch selected battery's limited nuclear interceptor. Existing Control battery cycling, mouse fire, P pause, Return next wave remain.
