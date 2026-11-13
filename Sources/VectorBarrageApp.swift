@@ -794,6 +794,11 @@ private struct BarrageWindow: View {
     private func draw(context: GraphicsContext, size: CGSize) {
         var ctx = context
         let w=size.width, h=size.height
+        if game.screenShake > 0 && game.mode == .modern && !game.rules.reducedFlash {
+            let amplitude=CGFloat(game.screenShake*9)
+            let clock=Date().timeIntervalSinceReferenceDate
+            ctx.translateBy(x:sin(clock*83)*amplitude,y:cos(clock*67)*amplitude*0.55)
+        }
         let cyan=Color(red:0.26,green:0.85,blue:1.0)
         let orange=Color(red:1,green:0.5,blue:0.24)
         let modern=game.mode == .modern
@@ -974,6 +979,96 @@ private struct BarrageWindow: View {
                          with:.color(.white.opacity(maxAlpha*flashEnvelope)))
             }
         }
+        if let transport=game.supplyTruck {
+            // Three-second vehicle transfer left to center to right.
+            let t=transport.progress
+            let x=w*(t < 0.5 ? 0.07+(0.50-0.07)*t*2 :
+                                0.50+(0.93-0.50)*(t-0.5)*2)
+            let y=ground-8
+            let body=CGRect(x:x-20,y:y-13,width:40,height:13)
+            ctx.fill(Path(roundedRect:body,cornerRadius:2),
+                     with:.color(Color(red:0.34,green:0.46,blue:0.44)))
+            ctx.stroke(Path(body),with:.color(.white.opacity(0.72)),lineWidth:1)
+            ctx.fill(Path(CGRect(x:x+8,y:y-22,width:10,height:9)),
+                     with:.color(Color(red:0.20,green:0.34,blue:0.38)))
+            for dx in [-12.0,13.0] {
+                ctx.fill(Path(ellipseIn:CGRect(x:x+dx-5,y:y-2,width:10,height:10)),
+                         with:.color(.black))
+                ctx.stroke(Path(ellipseIn:CGRect(x:x+dx-5,y:y-2,width:10,height:10)),
+                           with:.color(.cyan.opacity(0.7)),lineWidth:1.5)
+            }
+            ctx.draw(Text("AMMO TRANSFER \(Int((1-t)*3+0.99))s")
+                     .font(.system(size:10,weight:.bold,design:.monospaced))
+                     .foregroundColor(.white),
+                     at:CGPoint(x:x,y:y-35))
+        }
+        for shot in game.atomicShots {
+            let p=point(shot.point),origin=CGPoint(x:w*game.batteries[shot.battery],y:ground)
+            var trail=Path()
+            trail.move(to:origin);trail.addLine(to:p)
+            ctx.stroke(trail,with:.color(.orange.opacity(0.8)),lineWidth:3)
+            ctx.fill(Path(ellipseIn:CGRect(x:p.x-7,y:p.y-13,width:14,height:26)),
+                     with:.color(.white))
+            ctx.stroke(Path(ellipseIn:CGRect(x:p.x-12,y:p.y-12,width:24,height:24)),
+                       with:.color(.orange),lineWidth:2)
+        }
+        for fx in game.atomicBursts {
+            let p=point(fx.point)
+            let remain=max(0,1-fx.age/1.45)
+            let radius=CGFloat(24+fx.age*150)
+            let ring=Path(ellipseIn:CGRect(x:p.x-radius,y:p.y-radius,
+                                            width:radius*2,height:radius*2))
+            ctx.fill(ring,with:.color(.orange.opacity(remain*0.15)))
+            ctx.stroke(ring,with:.color(.white.opacity(remain)),lineWidth:5)
+            ctx.draw(Text("ATOMIC INTERCEPT  ×\(fx.intercepted)")
+                        .font(.system(size:16,weight:.heavy,design:.monospaced))
+                        .foregroundColor(.yellow.opacity(remain)),
+                     at:CGPoint(x:p.x,y:p.y-radius-17))
+        }
+        if let aircraft=game.bomber {
+            let p=point(aircraft.point)
+            // Original flying-wing geometry inspired by stealth aircraft,
+            // without a licensed model or silhouette asset.
+            var wing=Path()
+            wing.move(to:CGPoint(x:p.x,y:p.y-16))
+            wing.addLine(to:CGPoint(x:p.x-58,y:p.y+10))
+            wing.addLine(to:CGPoint(x:p.x-37,y:p.y+13))
+            wing.addLine(to:CGPoint(x:p.x-12,y:p.y+4))
+            wing.addLine(to:CGPoint(x:p.x,y:p.y+12))
+            wing.addLine(to:CGPoint(x:p.x+12,y:p.y+4))
+            wing.addLine(to:CGPoint(x:p.x+37,y:p.y+13))
+            wing.addLine(to:CGPoint(x:p.x+58,y:p.y+10))
+            wing.closeSubpath()
+            ctx.fill(wing,with:.color(Color(red:0.18,green:0.25,blue:0.34)))
+            ctx.stroke(wing,with:.color(.white.opacity(0.9)),lineWidth:2)
+            ctx.fill(Path(ellipseIn:CGRect(x:p.x-5,y:p.y-6,width:10,height:10)),
+                     with:.color(.cyan.opacity(0.7)))
+            ctx.draw(Text("STEALTH BOMBER")
+                    .font(.system(size:10,weight:.bold,design:.monospaced))
+                    .foregroundColor(.orange),
+                    at:CGPoint(x:p.x,y:p.y-31))
+        }
+        for fx in game.bomberExplosions {
+            let p=point(fx.point)
+            let fade=max(0,1-fx.age/1.4)
+            let radius=CGFloat(20+fx.age*120)
+            ctx.fill(Path(ellipseIn:CGRect(x:p.x-radius,y:p.y-radius,
+                     width:radius*2,height:radius*2)),
+                     with:.radialGradient(Gradient(colors:[
+                         .white.opacity(fade),.yellow.opacity(fade*0.85),
+                         .orange.opacity(fade*0.55),.clear]),
+                         center:p,startRadius:0,endRadius:radius))
+            ctx.stroke(Path(ellipseIn:CGRect(x:p.x-radius,y:p.y-radius,
+                       width:radius*2,height:radius*2)),
+                       with:.color(.white.opacity(fade)),lineWidth:4)
+            for i in 0..<20 {
+                let angle=Double(i)*Double.pi/10
+                let distance=CGFloat(14+fx.age*Double(35+(i*13)%82))
+                let dot=CGPoint(x:p.x+cos(angle)*distance,y:p.y+sin(angle)*distance)
+                ctx.fill(Path(ellipseIn:CGRect(x:dot.x-2,y:dot.y-2,width:4,height:4)),
+                         with:.color(.orange.opacity(fade)))
+            }
+        }
         // Larger, short-lived impact signatures give immediate kill confirmation.
         for fx in game.impacts {
             let p = point(fx.point)
@@ -1139,6 +1234,29 @@ private struct BarrageTelemetry: View {
                     .font(.system(size:12,weight:.semibold,design:.monospaced))
                     .foregroundStyle(ice)
                 rule
+                label("NUCLEAR INTERCEPTORS")
+                HStack(spacing:6) {
+                    ForEach(0..<3,id: \.self) { i in
+                        Text(game.nuclearAvailable[i] ? "●" : "○")
+                            .foregroundStyle(game.nuclearAvailable[i] ? amber : muted)
+                    }
+                    Spacer(minLength:0)
+                    Text("\(game.nuclearRemaining)/3")
+                        .font(.system(size:12,weight:.bold,design:.monospaced))
+                        .foregroundStyle(ice)
+                }.padding(.bottom,6)
+                if game.supplyTruck != nil {
+                    Text("SUPPLY TRUCK  //  EN ROUTE")
+                        .font(.system(size:9,weight:.bold,design:.monospaced))
+                        .foregroundStyle(amber)
+                        .padding(.bottom,4)
+                }
+                if game.bomber != nil {
+                    Text("AIRBORNE THREAT DETECTED")
+                        .font(.system(size:9,weight:.bold,design:.monospaced))
+                        .foregroundStyle(.red)
+                        .padding(.bottom,4)
+                }
                 label("INTERCEPTOR BATTERIES")
                 ForEach(0..<3,id: \.self) { i in
                     HStack(spacing: 5) {
