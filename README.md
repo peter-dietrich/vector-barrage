@@ -4,7 +4,7 @@ Native macOS missile-defense arcade game and fifth built-in Fun City cabinet.
 
 ## Current build
 
-**v1.2.1 — Vector Drift-inspired perimeter and named Custom Game presets**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
+**v1.2.2 — ammunition rollover and slower resupply**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
 
 - Defend six cities using three selectable interceptor batteries.
 - Enemy missiles, expanding interception zones, chain-reaction scoring and splitting missiles in later waves.
@@ -142,3 +142,11 @@ The default values preserve the established game balance (15 missiles per batter
 - Use **Load Saved Setup** to populate the editor and **Apply & Start** to play with those settings. Use **Delete Setup** to remove a named preset. Presets survive app restarts through local UserDefaults storage.
 - Saved setups do not replace or overwrite Saved Games, which continue to preserve battle progress separately.
 - The original keyboard controls and battery ammunition readouts remain available in the lower tactical strip.
+
+## v1.2.2 — ammunition carryover
+
+- Standard game begins with **12 rounds per battery**, not 15.
+- Each new wave adds **one round per battery** to the unused rounds already in that battery. No old ammunition disappears. For example, finishing wave 1 with 5 / 8 / 3 leaves 6 / 9 / 4 at the start of wave 2.
+- Higher-wave Custom Game starts use wave-1 ammunition plus the configured per-wave grant for previously skipped waves; subsequent waves preserve remaining rounds. Saved named custom setups retain their own base ammo and per-wave grant settings.
+- Low-ammo alerts compare the live remaining rounds against 20% (or configured value) of that battery's actual starting rounds for the wave, including carried ammunition.
+- Saved battles retain ammunition and their per-battery wave-opening capacity. Older saves remain loadable.
