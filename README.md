@@ -4,7 +4,7 @@ Native macOS missile-defense arcade game and fifth built-in Fun City cabinet.
 
 ## Current build
 
-**v0.4.0 — responsive interceptors and detailed battlefield**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
+**v0.5.0 — arcade audio, custom rules, save/resume and major city destruction**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
 
 - Defend six cities using three selectable interceptor batteries.
 - Enemy missiles, expanding interception zones, chain-reaction scoring and splitting missiles in later waves.
@@ -19,6 +19,10 @@ Native macOS missile-defense arcade game and fifth built-in Fun City cabinet.
 - More visible atmospheric depth: gradient sky, three layered mountain ridges and faint distant structures in Modern mode.
 - More distinctive operational cities (unique skylines, windows, antennas), detailed interceptor batteries and recognizable warhead silhouettes/trails.
 - Classic display remains restrained; active gameplay and Control-key battery cycling are unchanged.
+- Original synthesized launch, interception, chain, city-impact and wave-clear effects with a mute toggle.
+- Custom Game lets you choose starting wave, missiles per wave, interceptor ammo, incoming speed, sounds and reduced flash. Applying rules starts a fresh game.
+- Save Game and Resume retain up to five local battle snapshots via UserDefaults. Restored battles pause until P is pressed.
+- Cities render 10% larger. Destroyed cities produce a mushroom cloud, expanding blast and full-playfield white flash; reduced-flash mode decreases brightness.
 - Bundle identifier: `io.vectorbarrage.game`.
 
 ## Run on your Mac
