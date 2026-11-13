@@ -4,7 +4,7 @@ Native macOS missile-defense arcade game and fifth built-in Fun City cabinet.
 
 ## Current build
 
-**v1.2.7 — proportionally smaller missile batteries**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
+**v2026.11.13a — Vector Drift-style perimeter cleanup**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
 
 - Defend six cities using three selectable interceptor batteries.
 - Enemy missiles, expanding interception zones, chain-reaction scoring and splitting missiles in later waves.
@@ -170,3 +170,7 @@ All three battery graphics have been scaled down by 10% and redrawn as compact P
 ## v1.2.7 battery scale refinement
 
 Patriot-style launchers are now 20% smaller than v1.2.6 (scaled at 72% of original vector geometry), improving relative scale against city icons. Detail, selection rings, low-ammunition labels and original firing positions remain intact.
+
+## v2026.11.13a — streamlined perimeter
+
+Removed the redundant 48-point lower score and battery bar. The right telemetry is the canonical location for score, record holder, current wave, city status and battery ammunition. Pause, Supply Truck and Nuclear controls now sit in the top settings row between difficulty and graphics, and the thin bottom instruction/status strip remains. The freed vertical space expands the battlefield. The in-game source build label uses the same date-and-letter format as Vector Drift. Xcode's numeric marketing version uses `2026.11.13` because Apple version metadata doesn't accept a trailing letter.
