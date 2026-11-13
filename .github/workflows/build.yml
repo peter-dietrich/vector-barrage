@@ -1,0 +1,18 @@
+name: macOS build
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Vector Barrage
+        run: |
+          xcodebuild -project VectorBarrage.xcodeproj \
+            -scheme VectorBarrage \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO build
