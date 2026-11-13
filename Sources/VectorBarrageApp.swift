@@ -45,6 +45,11 @@ private struct Burst: Identifiable {
     var hostile: Bool
     var radius: Double { maxRadius * max(0, sin(min(1, age/1.05) * .pi)) }
 }
+private struct LaunchFX: Identifiable {
+    let id = UUID()
+    var point: Point2
+    var age = 0.0
+}
 private struct ImpactFX: Identifiable {
     let id = UUID()
     var point: Point2
@@ -72,6 +77,9 @@ private final class BarrageGame: ObservableObject {
     @Published var defenses: [Defense] = []
     @Published var bursts: [Burst] = []
     @Published var impacts: [ImpactFX] = []
+    @Published var launches: [LaunchFX] = []
+    @Published var battlePulse = 0.0
+    @Published var hitStreak = 0
     @Published var combo = 0
     @Published var bestCombo = 0
     @Published var totalIntercepts = 0
@@ -104,7 +112,8 @@ private final class BarrageGame: ObservableObject {
     var alive: Int { cities.filter { $0 }.count }
 
     func start() {
-        hostiles = []; defenses = []; bursts = []
+        hostiles = []; defenses = []; bursts = []; launches = []
+        hitStreak = 0; battlePulse = 0
         cities = Array(repeating: true, count: 6)
         score = 0; wave = 1; selected = 1
         combo = 0; bestCombo = 0; totalIntercepts = 0; gameSeconds = 0
@@ -112,7 +121,8 @@ private final class BarrageGame: ObservableObject {
         nextWave()
     }
     private func nextWave() {
-        hostiles = []; defenses = []; bursts = []; impacts = []
+        hostiles = []; defenses = []; bursts = []; impacts = []; launches = []
+        hitStreak = 0; battlePulse = 0
         ammo = [12,12,12]
         spawned = 0; spawnTimer = 0; recovery = 1.4; lastWaveBatch = -1
         pattern = wave < 2 ? .wide : [.wide,.flank,.cluster,.mirv][(wave-1)%4]
@@ -130,6 +140,8 @@ private final class BarrageGame: ObservableObject {
         let launch = Point2(x: batteries[selected],y:ground)
         ammo[selected] -= 1
         defenses.append(Defense(origin:launch,point:launch,target:target))
+        launches.append(LaunchFX(point:launch))
+        battlePulse = max(battlePulse,0.13)
         message = "INTERCEPTOR AWAY"
     }
     func togglePause() {
@@ -154,6 +166,9 @@ private final class BarrageGame: ObservableObject {
         let dt = max(0,min(0.05,now.timeIntervalSince(lastTick)))
         guard running && !paused && !waiting else { return }
         gameSeconds += dt
+        battlePulse = max(0,battlePulse-dt*2.3)
+        for i in launches.indices { launches[i].age += dt }
+        launches.removeAll { $0.age >= 0.28 }
         for i in impacts.indices { impacts[i].age += dt }
         impacts.removeAll { $0.age >= 0.85 }
         if gameSeconds-lastIntercept > 2.4 { combo = 0 }
@@ -186,7 +201,7 @@ private final class BarrageGame: ObservableObject {
         }
         hostiles.append(contentsOf:children)
         for i in defenses.indices {
-            defenses[i].point = defenses[i].point.moved(to:defenses[i].target,amount:0.85*dt)
+            defenses[i].point = defenses[i].point.moved(to:defenses[i].target,amount:1.23*dt)
         }
         let arriving = defenses.filter { $0.point.distance($0.target) < 0.00001 }
         for shot in arriving {
@@ -213,6 +228,8 @@ private final class BarrageGame: ObservableObject {
                     message = "CITY LOST — \(alive) REMAINING"
                 }
                 impacts.append(ImpactFX(point:missile.point,danger:true,points:0))
+                battlePulse = max(battlePulse,0.63)
+                hitStreak = 0
                 bursts.append(Burst(point:missile.point,maxRadius:0.045,hostile:true))
             }
         }
@@ -220,6 +237,8 @@ private final class BarrageGame: ObservableObject {
             combo = gameSeconds-lastIntercept < 2.4 ? combo+kills.count : kills.count
             bestCombo = max(combo,bestCombo)
             totalIntercepts += kills.count
+            hitStreak += kills.count
+            battlePulse = max(battlePulse,min(0.40,0.12 + Double(kills.count)*0.08))
             lastIntercept = gameSeconds
             for (i,missile) in kills.enumerated() {
                 let points = (missile.splits ? 50 : 25)*min(4,1+(combo-kills.count+i)/3)
@@ -266,7 +285,7 @@ private struct BarrageWindow: View {
         VStack(spacing:0) {
             HStack(spacing:14) {
                 Text("VECTOR BARRAGE").font(.system(size:16,weight:.heavy,design:.monospaced)).tracking(2)
-                Text("v0.3.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
+                Text("v0.4.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
                 Spacer()
                 Picker("Display",selection:$game.mode) {
                     ForEach(VisualMode.allCases) { Text($0.rawValue).tag($0) }
@@ -347,50 +366,116 @@ private struct BarrageWindow: View {
         }
         let ground=h*0.88
         if modern {
-            // Procedural atmospheric terrain is purposely confined to the lowest
-            // sky band; no bright edges or moving scenery compete with targets.
-            let back = [0.825,0.821,0.814,0.82,0.802,0.811,0.806,0.823,0.816,0.828]
-            let middle = [0.852,0.849,0.836,0.844,0.828,0.839,0.831,0.846,0.838,0.852]
-            func terrain(_ heights: [Double], color: Color) {
-                var p = Path()
-                p.move(to: CGPoint(x:0,y:ground))
-                for (i,y) in heights.enumerated() {
-                    p.addLine(to: CGPoint(x:w*CGFloat(i)/CGFloat(heights.count-1),y:h*y))
+            // Visible atmospheric depth. Landscape always remains behind targets.
+            let dusk = Path(CGRect(x:0,y:h*0.44,width:w,height:h*0.44))
+            ctx.fill(dusk,with:.linearGradient(
+                Gradient(colors:[
+                    Color(red:0.025,green:0.055,blue:0.11).opacity(0.02),
+                    Color(red:0.09,green:0.20,blue:0.29).opacity(0.60),
+                    Color(red:0.16,green:0.25,blue:0.32).opacity(0.80)]),
+                startPoint:CGPoint(x:w*0.5,y:h*0.44),
+                endPoint:CGPoint(x:w*0.5,y:ground)))
+            // Three separately shaded ridgelines, with a low skyline and
+            // believable silhouettes. None moves or flashes.
+            let ridges: [([Double],Color)] = [
+                ([0.745,0.730,0.755,0.708,0.731,0.690,0.720,0.742,0.707,0.758,0.740],
+                 Color(red:0.12,green:0.22,blue:0.30).opacity(0.64)),
+                ([0.786,0.770,0.751,0.779,0.738,0.766,0.742,0.779,0.753,0.789,0.774],
+                 Color(red:0.075,green:0.15,blue:0.22).opacity(0.90)),
+                ([0.827,0.810,0.831,0.798,0.817,0.799,0.828,0.810,0.838,0.817,0.834],
+                 Color(red:0.035,green:0.09,blue:0.15).opacity(0.99))
+            ]
+            for (profile,tint) in ridges {
+                var silhouette=Path()
+                silhouette.move(to:CGPoint(x:0,y:ground))
+                for (index,y) in profile.enumerated() {
+                    silhouette.addLine(to:CGPoint(x:w*CGFloat(index)/CGFloat(profile.count-1),y:h*y))
                 }
-                p.addLine(to: CGPoint(x:w,y:ground))
-                p.closeSubpath()
-                ctx.fill(p,with:.color(color))
+                silhouette.addLine(to:CGPoint(x:w,y:ground))
+                silhouette.closeSubpath()
+                ctx.fill(silhouette,with:.color(tint))
             }
-            terrain(back,color:Color(red:0.13,green:0.22,blue:0.29).opacity(0.22))
-            terrain(middle,color:Color(red:0.09,green:0.15,blue:0.22).opacity(0.32))
-            // The horizon line is present but deliberately barely perceptible.
-            line(CGPoint(x:0,y:h*0.82),CGPoint(x:w,y:h*0.82),cyan.opacity(0.055),0.7)
+            // Faint city-scale structures give the player a reference for distance.
+            for i in 0..<27 {
+                let px=w*CGFloat(i)/26
+                let height=CGFloat(7+(i*11)%24)
+                let pxRect=CGRect(x:px-3,y:ground-20-height,width:7,height:height)
+                ctx.fill(Path(pxRect),with:.color(Color(red:0.15,green:0.24,blue:0.30).opacity(0.50)))
+                if i.isMultiple(of:3) {
+                    ctx.fill(Path(CGRect(x:px,y:ground-14-height,width:1.2,height:1.2)),
+                             with:.color(Color(red:0.76,green:0.66,blue:0.44).opacity(0.36)))
+                }
+            }
+            line(CGPoint(x:0,y:ground-1),CGPoint(x:w,y:ground-1),
+                 cyan.opacity(0.31),1.0)
         }
         line(CGPoint(x:0,y:ground),CGPoint(x:w,y:ground),cyan,2)
         for i in 0..<6 {
             let x=w*game.cityLocations[i]
+            let ink:Color=modern ? cyan : .green
             if game.cities[i] {
-                for j in 0..<5 {
-                    let height=CGFloat([16,26,35,22,18][j])
-                    let rect=CGRect(x:x+CGFloat(j-2)*7.5-3.5,y:ground-height,width:7,height:height)
-                    ctx.stroke(Path(rect),with:.color(modern ? cyan : .green),lineWidth:1.3)
+                let pedestal=CGRect(x:x-24,y:ground-6,width:48,height:6)
+                ctx.fill(Path(pedestal),with:.color(Color(red:0.06,green:0.23,blue:0.30)))
+                ctx.stroke(Path(pedestal),with:.color(ink.opacity(0.72)),lineWidth:1)
+                // Each city has its own skyscraper heights and architectural detail.
+                let heights:[CGFloat]=[18,30,23,41,25,19]
+                for j in 0..<6 {
+                    let buildingHeight=heights[(j+i*2)%heights.count]
+                    let rect=CGRect(x:x-22+CGFloat(j)*7.4,y:ground-6-buildingHeight,
+                                    width:6.5,height:buildingHeight)
+                    ctx.fill(Path(rect),with:.color(Color(red:0.035,green:0.12,blue:0.20).opacity(modern ? 0.95 : 0.6)))
+                    ctx.stroke(Path(rect),with:.color(ink.opacity(modern ? 0.86 : 1)),lineWidth:1)
+                    if modern {
+                        for k in 0..<Int(buildingHeight/9) {
+                            let window=CGRect(x:rect.minX+2,y:rect.maxY-6-CGFloat(k)*8,width:2,height:2)
+                            ctx.fill(Path(window),with:.color(Color(red:0.99,green:0.76,blue:0.37).opacity(0.65)))
+                        }
+                    }
                 }
+                // Command antenna on the tallest local tower.
+                line(CGPoint(x:x+0.5,y:ground-47),CGPoint(x:x+0.5,y:ground-54),ink,1.1)
+                ctx.fill(Path(ellipseIn:CGRect(x:x-1.2,y:ground-56,width:3,height:3)),
+                         with:.color(.orange))
             } else {
-                line(CGPoint(x:x-16,y:ground-3),CGPoint(x:x+15,y:ground-15),orange,2)
-                line(CGPoint(x:x-10,y:ground-15),CGPoint(x:x+19,y:ground-4),orange,2)
+                ctx.fill(Path(CGRect(x:x-22,y:ground-5,width:44,height:5)),
+                         with:.color(.red.opacity(0.22)))
+                for j in 0..<5 {
+                    let left=x-19+CGFloat(j)*9
+                    line(CGPoint(x:left,y:ground-4),
+                         CGPoint(x:left+CGFloat((j%3)-1)*4,y:ground-10-CGFloat((j*7)%13)),
+                         orange.opacity(0.85),1.5)
+                }
             }
         }
         for i in 0..<3 {
             let x=w*game.batteries[i]
-            var bunker=Path()
-            bunker.move(to:CGPoint(x:x-23,y:ground))
-            bunker.addLine(to:CGPoint(x:x-14,y:ground-13))
-            bunker.addLine(to:CGPoint(x:x,y:ground-21))
-            bunker.addLine(to:CGPoint(x:x+14,y:ground-13))
-            bunker.addLine(to:CGPoint(x:x+23,y:ground))
-            bunker.closeSubpath()
-            ctx.stroke(bunker,with:.color(i == game.selected ? .white : cyan.opacity(0.7)),
-                lineWidth:i == game.selected ? 2.7 : 1.5)
+            let armed=i == game.selected
+            let baseInk:Color=armed ? .white : cyan.opacity(0.78)
+            let bunker=CGRect(x:x-27,y:ground-14,width:54,height:14)
+            ctx.fill(Path(bunker),with:.color(Color(red:0.04,green:0.14,blue:0.19)))
+            ctx.stroke(Path(bunker),with:.color(baseInk),lineWidth:1.4)
+            var hull=Path()
+            hull.move(to:CGPoint(x:x-22,y:ground-14))
+            hull.addLine(to:CGPoint(x:x-16,y:ground-29))
+            hull.addLine(to:CGPoint(x:x-6,y:ground-37))
+            hull.addLine(to:CGPoint(x:x+6,y:ground-37))
+            hull.addLine(to:CGPoint(x:x+16,y:ground-29))
+            hull.addLine(to:CGPoint(x:x+22,y:ground-14))
+            hull.closeSubpath()
+            ctx.fill(hull,with:.color(Color(red:0.065,green:0.17,blue:0.23)))
+            ctx.stroke(hull,with:.color(baseInk),lineWidth:armed ? 2.1 : 1.4)
+            // Articulated launcher on a raised platform.
+            line(CGPoint(x:x,y:ground-36),CGPoint(x:x,y:ground-48),baseInk,3)
+            line(CGPoint(x:x-9,y:ground-26),CGPoint(x:x+9,y:ground-26),baseInk.opacity(0.7),1)
+            for p in [-18.0,18.0] {
+                ctx.fill(Path(ellipseIn:CGRect(x:x+p-2,y:ground-9,width:4,height:4)),
+                         with:.color(armed ? .orange : cyan.opacity(0.4)))
+            }
+            // Selected battery is obvious without a large distracting glow.
+            if armed {
+                ctx.stroke(Path(ellipseIn:CGRect(x:x-32,y:ground-54,width:64,height:48)),
+                           with:.color(cyan.opacity(0.32)),lineWidth:1)
+            }
         }
         // Larger, short-lived impact signatures give immediate kill confirmation.
         for fx in game.impacts {
@@ -417,14 +502,56 @@ private struct BarrageWindow: View {
             }
         }
         for missile in game.hostiles {
-            line(point(missile.origin),point(missile.point),missile.splits ? .orange : .red,modern ? 1.7 : 1.2)
             let p=point(missile.point)
-            ctx.fill(Path(ellipseIn:CGRect(x:p.x-3,y:p.y-3,width:6,height:6)),with:.color(.white))
+            let source=point(missile.origin)
+            let delta=CGVector(dx:p.x-source.x,dy:p.y-source.y)
+            let length=max(1,hypot(delta.dx,delta.dy))
+            let ux=delta.dx/length, uy=delta.dy/length
+            let ink:Color=missile.splits ? .orange : .red
+            line(source,p,ink.opacity(0.55),modern ? 1.5 : 1.2)
+            let tail=CGPoint(x:p.x-ux*26,y:p.y-uy*26)
+            line(tail,p,ink,modern ? 3 : 1.6)
+            if modern {
+                line(CGPoint(x:p.x-ux*13,y:p.y-uy*13),p,.white.opacity(0.82),1.3)
+                // Sharp arrowhead / fins, clearly distinguish MIRVs.
+                var body=Path()
+                body.move(to:CGPoint(x:p.x+ux*7,y:p.y+uy*7))
+                body.addLine(to:CGPoint(x:p.x-ux*6-uy*4,y:p.y-uy*6+ux*4))
+                body.addLine(to:CGPoint(x:p.x-ux*2,y:p.y-uy*2))
+                body.addLine(to:CGPoint(x:p.x-ux*6+uy*4,y:p.y-uy*6-ux*4))
+                body.closeSubpath()
+                ctx.fill(body,with:.color(missile.splits ? .yellow : Color(red:1,green:0.77,blue:0.53)))
+                if missile.splits {
+                    ctx.stroke(Path(ellipseIn:CGRect(x:p.x-8,y:p.y-8,width:16,height:16)),
+                               with:.color(orange.opacity(0.65)),lineWidth:1)
+                }
+            } else {
+                ctx.fill(Path(ellipseIn:CGRect(x:p.x-3,y:p.y-3,width:6,height:6)),with:.color(.white))
+            }
         }
-        for defense in game.defenses {
-            line(point(defense.origin),point(defense.point),cyan,modern ? 2.2 : 1.4)
-            let p=point(defense.point)
-            ctx.fill(Path(ellipseIn:CGRect(x:p.x-2.4,y:p.y-2.4,width:4.8,height:4.8)),with:.color(.white))
+        for shot in game.defenses {
+            let p=point(shot.point)
+            let start=point(shot.origin)
+            let delta=CGVector(dx:p.x-start.x,dy:p.y-start.y)
+            let length=max(1,hypot(delta.dx,delta.dy))
+            let ux=delta.dx/length, uy=delta.dy/length
+            line(start,p,cyan.opacity(0.40),1.2)
+            line(CGPoint(x:p.x-ux*23,y:p.y-uy*23),p,cyan,modern ? 3.4 : 2)
+            ctx.fill(Path(ellipseIn:CGRect(x:p.x-4,y:p.y-4,width:8,height:8)),with:.color(.white))
+            if modern {
+                ctx.stroke(Path(ellipseIn:CGRect(x:p.x-7,y:p.y-7,width:14,height:14)),
+                           with:.color(cyan.opacity(0.56)),lineWidth:1)
+            }
+        }
+        // Immediate launch flare makes the click feel connected to the shot.
+        for flare in game.launches {
+            let p=point(flare.point)
+            let fade=max(0,1-flare.age/0.28)
+            let r=CGFloat(6+flare.age*48)
+            ctx.stroke(Path(ellipseIn:CGRect(x:p.x-r,y:p.y-r,width:r*2,height:r*2)),
+                       with:.color(.white.opacity(fade*0.9)),lineWidth:2)
+            ctx.fill(Path(ellipseIn:CGRect(x:p.x-4,y:p.y-4,width:8,height:8)),
+                     with:.color(.orange.opacity(fade)))
         }
         for blast in game.bursts {
             let p=point(blast.point),r=CGFloat(blast.radius)*min(w,h)
@@ -432,11 +559,20 @@ private struct BarrageWindow: View {
             ctx.fill(ring,with:.color((blast.hostile ? orange : cyan).opacity(modern ? 0.16 : 0.09)))
             ctx.stroke(ring,with:.color(blast.hostile ? orange : .white),lineWidth:modern ? 2.8 : 1.7)
         }
+        if modern && game.battlePulse > 0 {
+            let danger=game.impacts.contains(where: { $0.danger && $0.age < 0.24 })
+            ctx.fill(Path(CGRect(x:0,y:0,width:w,height:h)),
+                     with:.color((danger ? Color.red : Color.white).opacity(game.battlePulse*0.14)))
+        }
         let cursor=point(game.aim)
         line(CGPoint(x:cursor.x-12,y:cursor.y),CGPoint(x:cursor.x-4,y:cursor.y),cyan)
         line(CGPoint(x:cursor.x+4,y:cursor.y),CGPoint(x:cursor.x+12,y:cursor.y),cyan)
         line(CGPoint(x:cursor.x,y:cursor.y-12),CGPoint(x:cursor.x,y:cursor.y-4),cyan)
         line(CGPoint(x:cursor.x,y:cursor.y+4),CGPoint(x:cursor.x,y:cursor.y+12),cyan)
+        if modern {
+            ctx.stroke(Path(ellipseIn:CGRect(x:cursor.x-16,y:cursor.y-16,width:32,height:32)),
+                       with:.color(cyan.opacity(0.34)),lineWidth:0.9)
+        }
         if !game.running || game.paused || game.waiting {
             let heading=game.gameOver ? "GAME OVER" : game.paused ? "PAUSED" :
                 game.waiting ? "WAVE CLEARED" : "VECTOR BARRAGE"
