@@ -99,6 +99,7 @@ private final class BarrageGame: ObservableObject {
         message = "WAVE \(wave) — DEFEND THE CITIES"
     }
     func select(_ n: Int) { if (0..<3).contains(n) { selected = n } }
+    func cycleBattery() { selected = (selected + 1) % batteries.count }
     func fire(_ location: Point2) {
         guard running && !paused && !waiting && ammo[selected] > 0 else { return }
         let target = Point2(x: max(0.02,min(0.98,location.x)), y: max(0.03,min(0.81,location.y)))
@@ -117,9 +118,6 @@ private final class BarrageGame: ObservableObject {
         case "\r", "\n":
             if !running || gameOver { start() }
             else if waiting { wave += 1; nextWave() }
-        case "1", "a": select(0)
-        case "2", "s": select(1)
-        case "3", "d": select(2)
         case "p": togglePause()
         case "r": start()
         case " ": fire(aim)
@@ -235,7 +233,7 @@ private struct BarrageWindow: View {
                     game.fire(Point2(x:Double(value.location.x/max(1,geometry.size.width)),
                         y:Double(value.location.y/max(1,geometry.size.height))))
                 })
-                .overlay(KeyboardCapture(onKey:game.key).allowsHitTesting(false))
+                .overlay(KeyboardCapture(onKey:game.key, onControlPress:game.cycleBattery).allowsHitTesting(false))
             }
             HStack(spacing:20) {
                 Text("SCORE \(game.score)")
@@ -254,7 +252,7 @@ private struct BarrageWindow: View {
             HStack {
                 Text(game.message).foregroundStyle(.orange)
                 Spacer()
-                Text("CLICK FIRE   1/2/3 BATTERY   P PAUSE   RETURN START/NEXT WAVE")
+                Text("CLICK FIRE   CONTROL CYCLE BATTERY   P PAUSE   RETURN START/NEXT WAVE")
                     .foregroundStyle(.white.opacity(0.52))
             }
             .font(.system(size:10,weight:.semibold,design:.monospaced))
@@ -346,15 +344,22 @@ private struct BarrageWindow: View {
 
 private struct KeyboardCapture: NSViewRepresentable {
     let onKey: (String) -> Void
+    let onControlPress: () -> Void
     func makeNSView(context:Context) -> KeyView {
         let view=KeyView()
         view.onKey=onKey
+        view.onControlPress=onControlPress
         DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
         return view
     }
-    func updateNSView(_ nsView:KeyView,context:Context) { nsView.onKey=onKey }
+    func updateNSView(_ nsView:KeyView,context:Context) {
+        nsView.onKey=onKey
+        nsView.onControlPress=onControlPress
+    }
     final class KeyView: NSView {
         var onKey: ((String)->Void)?
+        var onControlPress: (() -> Void)?
+        private var controlHeld = false
         override var acceptsFirstResponder: Bool { true }
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -362,6 +367,12 @@ private struct KeyboardCapture: NSViewRepresentable {
                 guard let self else { return }
                 self.window?.makeFirstResponder(self)
             }
+        }
+        override func flagsChanged(with event:NSEvent) {
+            super.flagsChanged(with:event)
+            let down = event.modifierFlags.contains(.control)
+            if down && !controlHeld { onControlPress?() }
+            controlHeld = down
         }
         override func keyDown(with event:NSEvent) {
             if let text=event.charactersIgnoringModifiers { onKey?(text) }
