@@ -4,7 +4,7 @@ Native macOS missile-defense arcade game and fifth built-in Fun City cabinet.
 
 ## Current build
 
-**v0.9.0 — side-profile stealth bombers and ballistic bomb runs**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
+**v1.0.0 — day/night scenery and Tab battery cycling**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
 
 - Defend six cities using three selectable interceptor batteries.
 - Enemy missiles, expanding interception zones, chain-reaction scoring and splitting missiles in later waves.
@@ -18,7 +18,7 @@ Native macOS missile-defense arcade game and fifth built-in Fun City cabinet.
 - Faster interceptor travel, instantaneous launch flashes and restrained combat feedback pulses.
 - More visible atmospheric depth: gradient sky, three layered mountain ridges and faint distant structures in Modern mode.
 - More distinctive operational cities (unique skylines, windows, antennas), detailed interceptor batteries and recognizable warhead silhouettes/trails.
-- Classic display remains restrained; active gameplay and Control-key battery cycling are unchanged.
+- Classic display remains restrained; active gameplay and Tab-key battery cycling are unchanged.
 - Original synthesized launch, interception, chain, city-impact and wave-clear effects with a mute toggle.
 - Custom Game lets you choose starting wave, missiles per wave, interceptor ammo, incoming speed, sounds and reduced flash. Applying rules starts a fresh game.
 - Save Game and Resume retain up to five local battle snapshots via UserDefaults. Restored battles pause until P is pressed.
@@ -54,7 +54,7 @@ xcodebuild -project VectorBarrage.xcodeproj -scheme VectorBarrage -destination '
 | --- | --- |
 | Return | Start / advance to the next wave / restart after game over |
 | Mouse click | Fire an interceptor at the clicked location |
-| Control (tap) | Cycle left → center → right → left battery |
+| Tab (tap) | Cycle left → center → right → left battery |
 | Space | Fire at the last cursor location |
 | P | Pause / resume |
 | R | Start a new game |
@@ -79,7 +79,7 @@ An original game inspired by the classic missile-defense arcade genre. No Atari/
 - New logistics/airborne indicators in right telemetry. Save-game snapshots include the new persistent gameplay state where available and older slots remain readable.
 - Full flash and shake are reduced in the custom game's reduced-flash option.
 
-**New controls**: T redistribute ammo; N launch selected battery's limited nuclear interceptor. Existing Control battery cycling, mouse fire, P pause, Return next wave remain.
+**New controls**: T redistribute ammo; N launch selected battery's limited nuclear interceptor. Existing Tab battery cycling, mouse fire, P pause, Return next wave remain.
 
 ## v0.8.0 improvements
 
@@ -96,3 +96,11 @@ An original game inspired by the classic missile-defense arcade genre. No Atari/
 - Bomb releases are timed **before the aircraft reaches the target**, using a predicted ballistic landing point and the city locations. Each city is targeted at most once per bomber pass, and shots are spaced to avoid rapid-fire bomb spam.
 - Falling bombs can be shot down by expanding player interceptor blast zones and earn 50 points; unopposed hits trigger normal city-destruction effects.
 - Falling bomb positions/velocities are included in local saved battles; older save slots remain readable.
+
+## v1.0.0 scenery and controls
+
+- **Tab** now cycles left → center → right missile batteries, replacing Control. The top-level on-screen instruction has been updated. The game view must have focus to receive key events.
+- New battles choose a random hour. Each new wave advances the clock **2 hours 45 minutes**, moving through dawn, day, dusk, night, and back again. Telemetry shows the time and daylight period.
+- Modern mode now features a wave-sensitive gradient sky with a dim sun/moon, a seeded procedural starfield in the spirit of Vector Drift, slowly drifting clouds, and three significantly more varied layered mountain ridges with atmospheric depth.
+- Stars fade in sunlight, distant mountains brighten and desaturate by day, and ambient scenery colors shift with daylight. Gameplay effects and threat contrast remain prioritized. Classic mode remains simple.
+- Saves retain the current scenery seed and time; earlier saves use a safe default.
