@@ -935,6 +935,120 @@ private struct BarrageWindow: View {
                 Button("OK") {saveNotice=""}
             } message: {Text(saveNotice)}
     }
+    // Scenery is entirely procedural: no external images, and deliberately
+    // behind the missile and aircraft layers. Daylight evolves per wave.
+    private func drawScenery(context: GraphicsContext,size: CGSize,ground: CGFloat) {
+        let w=size.width,h=size.height
+        let hour=game.timeOfDay
+        // Smooth daylight strength: full brightness around midday, stars at night.
+        let sunHeight=sin((hour-6)*Double.pi/12)
+        let daylight=max(0,min(1,(sunHeight+0.13)/0.85))
+        let twilight=max(0,1-abs(sunHeight)/0.35)
+        let night=1-daylight
+        let evening=hour >= 12
+        let warmth=twilight*(evening ? 1.0 : 0.83)
+        let skyTop=Color(red:0.018+daylight*0.20+warmth*0.08,
+                         green:0.028+daylight*0.40+warmth*0.07,
+                         blue:0.080+daylight*0.57+warmth*0.06)
+        let skyBottom=Color(red:0.065+daylight*0.39+warmth*0.27,
+                            green:0.12+daylight*0.55+warmth*0.09,
+                            blue:0.22+daylight*0.56-warmth*0.05)
+        let sky=Path(CGRect(x:0,y:0,width:w,height:ground))
+        context.fill(sky,with:.linearGradient(
+            Gradient(colors:[skyTop,skyTop.opacity(0.95),skyBottom]),
+            startPoint:CGPoint(x:w/2,y:0),endPoint:CGPoint(x:w/2,y:ground)))
+        // Vector Drift-style dimensional starfield: fixed stars are seeded from
+        // the saved scenery seed, with subtle color, size and independent twinkle.
+        let starBrightness=pow(night,1.55)
+        if starBrightness > 0.015 {
+            for i in 0..<155 {
+                let seed=game.scenerySeed
+                let u=Double((i*71_827 + seed*31) % 100_003)/100_003
+                let v=Double((i*47_123 + seed*17) % 100_019)/100_019
+                let px=w*CGFloat(u),py=h*CGFloat(v*0.70)
+                let radius=CGFloat(i.isMultiple(of:13) ? 1.5 : i.isMultiple(of:5) ? 1.05 : 0.60)
+                let twinkle=0.84+0.16*sin(game.gameSeconds*0.8+Double(i)*1.71)
+                let alpha=starBrightness*(0.24+Double(i%7)*0.075)*twinkle
+                let tint:Color=i.isMultiple(of:9) ? Color(red:0.73,green:0.82,blue:1) :
+                               (i.isMultiple(of:11) ? Color(red:1,green:0.88,blue:0.70) : .white)
+                context.fill(Path(ellipseIn:CGRect(x:px-radius,y:py-radius,
+                                 width:radius*2,height:radius*2)),
+                             with:.color(tint.opacity(alpha)))
+            }
+        }
+        // Sun or moon adds an identifiable time-of-day cue, but remains dim
+        // enough not to be mistaken for a bright incoming missile.
+        let sunX=w*CGFloat(0.12+0.76*max(0,min(1,(hour-6)/12)))
+        let sunY=h*CGFloat(0.72-max(0,sunHeight)*0.54)
+        if daylight > 0.035 {
+            let disc=Path(ellipseIn:CGRect(x:sunX-15,y:sunY-15,width:30,height:30))
+            context.fill(disc,with:.color(Color(red:1,green:0.84,blue:0.58).opacity(daylight*0.54)))
+        } else {
+            let moon=Path(ellipseIn:CGRect(x:w*0.76-8,y:h*0.20-8,width:16,height:16))
+            context.fill(moon,with:.color(Color(red:0.78,green:0.87,blue:1).opacity(0.35)))
+        }
+        // Slow clouds cross the playfield independent of missiles and waves.
+        let cloudAlpha=0.13+daylight*0.23
+        for layer in 0..<7 {
+            let speed=0.0018+Double(layer%3)*0.0008
+            let base=Double(layer)*0.19-0.18
+            let x=w*CGFloat((base+game.gameSeconds*speed).truncatingRemainder(dividingBy:1.5))
+            let y=h*CGFloat(0.13+Double((layer*13)%17)*0.025)
+            let cw=w*CGFloat(0.10+Double(layer%3)*0.029)
+            var cloud=Path()
+            cloud.addEllipse(in:CGRect(x:x,y:y+14,width:cw,height:18))
+            cloud.addEllipse(in:CGRect(x:x+cw*0.12,y:y+4,width:cw*0.49,height:27))
+            cloud.addEllipse(in:CGRect(x:x+cw*0.43,y:y,width:cw*0.41,height:29))
+            cloud.addEllipse(in:CGRect(x:x+cw*0.68,y:y+9,width:cw*0.31,height:21))
+            context.fill(cloud,with:.color(Color(red:0.78,green:0.85,blue:0.92).opacity(cloudAlpha)))
+        }
+        // More natural, irregular ridges: sampled at 90 points per layer and
+        // interpolated smoothly. Back ridge is lighter for aerial perspective.
+        for layer in 0..<3 {
+            let base=layer == 0 ? 0.707 : layer == 1 ? 0.780 : 0.834
+            let amplitude=layer == 0 ? 0.078 : layer == 1 ? 0.052 : 0.027
+            let tint:Color
+            if layer == 0 {
+                tint=Color(red:0.11+daylight*0.34,green:0.20+daylight*0.35,
+                           blue:0.31+daylight*0.30)
+            } else if layer == 1 {
+                tint=Color(red:0.055+daylight*0.23,green:0.13+daylight*0.27,
+                           blue:0.22+daylight*0.26)
+            } else {
+                tint=Color(red:0.025+daylight*0.12,green:0.07+daylight*0.17,
+                           blue:0.13+daylight*0.17)
+            }
+            var ridge=Path()
+            ridge.move(to:CGPoint(x:0,y:ground))
+            let samples=100
+            for i in 0...samples {
+                let x=Double(i)/Double(samples)
+                let phase=Double(game.scenerySeed%997)*0.001+Double(layer)*1.7
+                // Broad ridges, intermediate peaks and very small uneven edges.
+                let broad=0.52*sin(x*12.7+phase)+0.31*sin(x*27.3-phase*1.4)
+                let peaks=0.19*abs(sin(x*49+phase*2.3))+
+                          0.10*sin(x*85-phase*0.7)
+                let altitude=base-amplitude*(broad+peaks)
+                ridge.addLine(to:CGPoint(x:w*CGFloat(x),y:h*CGFloat(altitude)))
+            }
+            ridge.addLine(to:CGPoint(x:w,y:ground))
+            ridge.closeSubpath()
+            context.fill(ridge,with:.color(tint))
+        }
+        // Dark foreground and spaced ridgeline markers convey depth.
+        for i in 0..<26 {
+            let x=w*CGFloat(i)/25
+            let height=CGFloat(8+(i*19)%25)
+            context.fill(Path(CGRect(x:x-3,y:ground-height-5,width:7,height:height)),
+                with:.color(Color(red:0.025+daylight*0.13,green:0.065+daylight*0.16,
+                                  blue:0.11+daylight*0.19).opacity(0.61)))
+            if night > 0.25 && i.isMultiple(of:4) {
+                context.fill(Path(CGRect(x:x,y:ground-height+1,width:2,height:2)),
+                             with:.color(Color.orange.opacity(night*0.40)))
+            }
+        }
+    }
+
     private func draw(context: GraphicsContext, size: CGSize) {
         var ctx = context
         let w=size.width, h=size.height
@@ -952,60 +1066,17 @@ private struct BarrageWindow: View {
             path.move(to:a);path.addLine(to:b)
             ctx.stroke(path,with:.color(color),lineWidth:width)
         }
+        let ground=h*0.88
         if modern {
+            drawScenery(context:ctx,size:size,ground:ground)
             for i in 1..<12 {
                 let y=h*CGFloat(i)/12
-                line(CGPoint(x:0,y:y),CGPoint(x:w,y:y),cyan.opacity(0.075),0.7)
+                line(CGPoint(x:0,y:y),CGPoint(x:w,y:y),cyan.opacity(0.045),0.65)
             }
             for i in 1..<18 {
                 let x=w*CGFloat(i)/18
-                line(CGPoint(x:x,y:0),CGPoint(x:x,y:h),cyan.opacity(0.055),0.7)
+                line(CGPoint(x:x,y:0),CGPoint(x:x,y:h),cyan.opacity(0.040),0.65)
             }
-        }
-        let ground=h*0.88
-        if modern {
-            // Visible atmospheric depth. Landscape always remains behind targets.
-            let dusk = Path(CGRect(x:0,y:h*0.44,width:w,height:h*0.44))
-            ctx.fill(dusk,with:.linearGradient(
-                Gradient(colors:[
-                    Color(red:0.025,green:0.055,blue:0.11).opacity(0.02),
-                    Color(red:0.09,green:0.20,blue:0.29).opacity(0.60),
-                    Color(red:0.16,green:0.25,blue:0.32).opacity(0.80)]),
-                startPoint:CGPoint(x:w*0.5,y:h*0.44),
-                endPoint:CGPoint(x:w*0.5,y:ground)))
-            // Three separately shaded ridgelines, with a low skyline and
-            // believable silhouettes. None moves or flashes.
-            let ridges: [([Double],Color)] = [
-                ([0.745,0.730,0.755,0.708,0.731,0.690,0.720,0.742,0.707,0.758,0.740],
-                 Color(red:0.12,green:0.22,blue:0.30).opacity(0.64)),
-                ([0.786,0.770,0.751,0.779,0.738,0.766,0.742,0.779,0.753,0.789,0.774],
-                 Color(red:0.075,green:0.15,blue:0.22).opacity(0.90)),
-                ([0.827,0.810,0.831,0.798,0.817,0.799,0.828,0.810,0.838,0.817,0.834],
-                 Color(red:0.035,green:0.09,blue:0.15).opacity(0.99))
-            ]
-            for (profile,tint) in ridges {
-                var silhouette=Path()
-                silhouette.move(to:CGPoint(x:0,y:ground))
-                for (index,y) in profile.enumerated() {
-                    silhouette.addLine(to:CGPoint(x:w*CGFloat(index)/CGFloat(profile.count-1),y:h*y))
-                }
-                silhouette.addLine(to:CGPoint(x:w,y:ground))
-                silhouette.closeSubpath()
-                ctx.fill(silhouette,with:.color(tint))
-            }
-            // Faint city-scale structures give the player a reference for distance.
-            for i in 0..<27 {
-                let px=w*CGFloat(i)/26
-                let height=CGFloat(7+(i*11)%24)
-                let pxRect=CGRect(x:px-3,y:ground-20-height,width:7,height:height)
-                ctx.fill(Path(pxRect),with:.color(Color(red:0.15,green:0.24,blue:0.30).opacity(0.50)))
-                if i.isMultiple(of:3) {
-                    ctx.fill(Path(CGRect(x:px,y:ground-14-height,width:1.2,height:1.2)),
-                             with:.color(Color(red:0.76,green:0.66,blue:0.44).opacity(0.36)))
-                }
-            }
-            line(CGPoint(x:0,y:ground-1),CGPoint(x:w,y:ground-1),
-                 cyan.opacity(0.31),1.0)
         }
         line(CGPoint(x:0,y:ground),CGPoint(x:w,y:ground),cyan,2)
         let threatened=game.threatenedCityIndices
