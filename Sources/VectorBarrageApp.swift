@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import AVFoundation
 
 @main
 struct VectorBarrageApp: App {
@@ -12,7 +13,7 @@ struct VectorBarrageApp: App {
     }
 }
 
-private struct Point2 {
+private struct Point2: Codable {
     var x: Double
     var y: Double
     func distance(_ other: Point2) -> Double { hypot(x-other.x, y-other.y) }
@@ -22,7 +23,7 @@ private struct Point2 {
         return Point2(x: x+(target.x-x)*amount/d, y: y+(target.y-y)*amount/d)
     }
 }
-private struct Hostile: Identifiable {
+private struct Hostile: Identifiable, Codable {
     let id = UUID()
     var origin: Point2
     var point: Point2
@@ -31,13 +32,13 @@ private struct Hostile: Identifiable {
     var splits: Bool
     var hasSplit = false
 }
-private struct Defense: Identifiable {
+private struct Defense: Identifiable, Codable {
     let id = UUID()
     var origin: Point2
     var point: Point2
     var target: Point2
 }
-private struct Burst: Identifiable {
+private struct Burst: Identifiable, Codable {
     let id = UUID()
     var point: Point2
     var age = 0.0
@@ -45,28 +46,138 @@ private struct Burst: Identifiable {
     var hostile: Bool
     var radius: Double { maxRadius * max(0, sin(min(1, age/1.05) * .pi)) }
 }
-private struct LaunchFX: Identifiable {
+private struct LaunchFX: Identifiable, Codable {
     let id = UUID()
     var point: Point2
     var age = 0.0
 }
-private struct ImpactFX: Identifiable {
+private struct ImpactFX: Identifiable, Codable {
     let id = UUID()
     var point: Point2
     var age = 0.0
     var danger: Bool
     var points: Int
 }
-private enum AttackPattern: String {
+private struct NuclearFX: Identifiable, Codable {
+    let id = UUID()
+    var point: Point2
+    var age = 0.0
+}
+private struct GameRules: Codable {
+    var startingWave = 1
+    var batteryAmmo = 12
+    var waveSize = 100
+    var missileSpeed = 100
+    var soundEnabled = true
+    var reducedFlash = false
+}
+private struct SavedBattle: Codable, Identifiable {
+    var id = UUID()
+    var savedAt = Date()
+    var name: String
+    var rules: GameRules
+    var mode: VisualMode
+    var difficulty: Difficulty
+    var hostiles: [Hostile]
+    var defenses: [Defense]
+    var bursts: [Burst]
+    var cities: [Bool]
+    var ammo: [Int]
+    var selected: Int
+    var score: Int
+    var wave: Int
+    var running: Bool
+    var waiting: Bool
+    var gameOver: Bool
+    var combo: Int
+    var bestCombo: Int
+    var totalIntercepts: Int
+    var spawned: Int
+    var spawnTimer: Double
+    var quota: Int
+    var pattern: AttackPattern
+    var lastWaveBatch: Int
+    var recovery: Double
+    var gameSeconds: Double
+    var lastIntercept: Double
+}
+@MainActor
+private enum BattleStore {
+    static let key = "VectorBarrage.savedBattles.v1"
+    static func list() -> [SavedBattle] {
+        guard let data=UserDefaults.standard.data(forKey:key),
+              let battles=try? JSONDecoder().decode([SavedBattle].self,from:data) else { return [] }
+        return battles.sorted { $0.savedAt > $1.savedAt }
+    }
+    static func insert(_ battle: SavedBattle) {
+        var battles=list()
+        battles.insert(battle,at:0)
+        if battles.count > 5 { battles=Array(battles.prefix(5)) }
+        if let data=try? JSONEncoder().encode(battles) { UserDefaults.standard.set(data,forKey:key) }
+    }
+    static func delete(_ id: UUID) {
+        let battles=list().filter { $0.id != id }
+        if let data=try? JSONEncoder().encode(battles) { UserDefaults.standard.set(data,forKey:key) }
+    }
+}
+@MainActor
+private final class ArcadeAudio {
+    private var active: [NSSound] = []
+    private var lastEvent: [String:Date] = [:]
+    func play(_ event: String, enabled: Bool) {
+        guard enabled else { return }
+        let now=Date()
+        if let last=lastEvent[event], now.timeIntervalSince(last) < 0.07 { return }
+        lastEvent[event]=now
+        active=active.filter { $0.isPlaying }
+        let duration: Double
+        let freq: Double
+        let volume: Double
+        switch event {
+        case "launch": duration=0.17;freq=690;volume=0.22
+        case "hit": duration=0.28;freq=390;volume=0.32
+        case "chain": duration=0.46;freq=550;volume=0.43
+        case "city": duration=1.5;freq=75;volume=0.70
+        case "wave": duration=0.65;freq=620;volume=0.30
+        default: duration=0.12;freq=250;volume=0.20
+        }
+        let rate=22050
+        let count=Int(duration*Double(rate))
+        var samples=[Int16](repeating:0,count:count)
+        for i in 0..<count {
+            let t=Double(i)/Double(rate)
+            let envelope=pow(max(0,1-t/duration),event == "city" ? 1.4 : 2.2)
+            let glide=event == "launch" ? 1.8-t/duration : event == "city" ? 1.1-0.7*t/duration : 1.0-0.25*t/duration
+            let sine=sin(2*Double.pi*freq*glide*t)
+            let noise=sin(t*15981)*sin(t*4133)
+            let mixed=event == "city" ? 0.55*sine+0.45*noise : 0.85*sine+0.15*noise
+            samples[i]=Int16(max(-32767,min(32767,mixed*volume*envelope*32767)))
+        }
+        var data=Data()
+        func put16(_ n: UInt16) { var x=n.littleEndian;withUnsafeBytes(of:&x){data.append(contentsOf:$0)} }
+        func put32(_ n: UInt32) { var x=n.littleEndian;withUnsafeBytes(of:&x){data.append(contentsOf:$0)} }
+        data.append(contentsOf:"RIFF".utf8);put32(UInt32(36+count*2))
+        data.append(contentsOf:"WAVEfmt ".utf8);put32(16);put16(1);put16(1)
+        put32(UInt32(rate));put32(UInt32(rate*2));put16(2);put16(16)
+        data.append(contentsOf:"data".utf8);put32(UInt32(count*2))
+        samples.withUnsafeBytes { data.append(contentsOf:$0) }
+        if let sound=NSSound(data:data) {
+            sound.volume=1.0
+            sound.play()
+            active.append(sound)
+        }
+    }
+}
+private enum AttackPattern: String, Codable {
     case wide = "WIDE FRONT", flank = "FLANK ATTACK", cluster = "CLUSTER RAID", mirv = "MIRV ALERT"
 }
-private enum Difficulty: String, CaseIterable, Identifiable {
+private enum Difficulty: String, CaseIterable, Identifiable, Codable {
     case cadet = "Cadet", veteran = "Veteran", ace = "Ace"
     var id: String { rawValue }
     var multiplier: Double { self == .cadet ? 0.8 : self == .ace ? 1.3 : 1 }
     var interval: Double { self == .cadet ? 1.6 : self == .ace ? 0.85 : 1.2 }
 }
-private enum VisualMode: String, CaseIterable, Identifiable {
+private enum VisualMode: String, CaseIterable, Identifiable, Codable {
     case classic = "Classic", modern = "Modern"
     var id: String { rawValue }
 }
@@ -78,6 +189,9 @@ private final class BarrageGame: ObservableObject {
     @Published var bursts: [Burst] = []
     @Published var impacts: [ImpactFX] = []
     @Published var launches: [LaunchFX] = []
+    @Published var nuclear: [NuclearFX] = []
+    @Published var rules = GameRules()
+    private let audio = ArcadeAudio()
     @Published var battlePulse = 0.0
     @Published var hitStreak = 0
     @Published var combo = 0
@@ -115,7 +229,7 @@ private final class BarrageGame: ObservableObject {
         hostiles = []; defenses = []; bursts = []; launches = []
         hitStreak = 0; battlePulse = 0
         cities = Array(repeating: true, count: 6)
-        score = 0; wave = 1; selected = 1
+        score = 0; wave = max(1,min(20,rules.startingWave)); selected = 1
         combo = 0; bestCombo = 0; totalIntercepts = 0; gameSeconds = 0
         running = true; paused = false; gameOver = false; waiting = false
         nextWave()
@@ -123,12 +237,12 @@ private final class BarrageGame: ObservableObject {
     private func nextWave() {
         hostiles = []; defenses = []; bursts = []; impacts = []; launches = []
         hitStreak = 0; battlePulse = 0
-        ammo = [12,12,12]
+        ammo = Array(repeating: max(4,min(30,rules.batteryAmmo)),count:3)
         spawned = 0; spawnTimer = 0; recovery = 1.4; lastWaveBatch = -1
         pattern = wave < 2 ? .wide : [.wide,.flank,.cluster,.mirv][(wave-1)%4]
         assault = pattern.rawValue
         combo = 0; lastIntercept = -100
-        quota = min(30, 6 + wave * 3)
+        quota = max(3,min(55,Int(Double(min(30,6+wave*3))*Double(rules.waveSize)/100)))
         waiting = false
         message = "WAVE \(wave) — \(assault)"
     }
@@ -143,6 +257,7 @@ private final class BarrageGame: ObservableObject {
         launches.append(LaunchFX(point:launch))
         battlePulse = max(battlePulse,0.13)
         message = "INTERCEPTOR AWAY"
+        audio.play("launch",enabled:rules.soundEnabled)
     }
     func togglePause() {
         guard running && !waiting else { return }
@@ -164,6 +279,10 @@ private final class BarrageGame: ObservableObject {
         defer { lastTick = now }
         guard let lastTick else { return }
         let dt = max(0,min(0.05,now.timeIntervalSince(lastTick)))
+        if !paused {
+            for i in nuclear.indices { nuclear[i].age += dt }
+            nuclear.removeAll { $0.age >= 2.6 }
+        }
         guard running && !paused && !waiting else { return }
         gameSeconds += dt
         battlePulse = max(0,battlePulse-dt*2.3)
@@ -224,6 +343,8 @@ private final class BarrageGame: ObservableObject {
                     abs(cityLocations[$0]-missile.target.x) < abs(cityLocations[$1]-missile.target.x)
                 }), abs(cityLocations[hit]-missile.target.x) < 0.09, cities[hit] {
                     cities[hit] = false
+                    nuclear.append(NuclearFX(point:Point2(x:cityLocations[hit],y:ground)))
+                    audio.play("city",enabled:rules.soundEnabled)
                     combo = 0
                     message = "CITY LOST — \(alive) REMAINING"
                 }
@@ -245,6 +366,7 @@ private final class BarrageGame: ObservableObject {
                 score += points
                 impacts.append(ImpactFX(point:missile.point,danger:false,points:points))
             }
+            audio.play(kills.count >= 2 ? "chain" : "hit",enabled:rules.soundEnabled)
             message = kills.count >= 3 ? "CHAIN REACTION ×\(kills.count) — COMBO \(combo)" :
                 kills.count == 2 ? "DOUBLE INTERCEPT — COMBO \(combo)" : "INTERCEPT CONFIRMED"
         }
@@ -256,8 +378,35 @@ private final class BarrageGame: ObservableObject {
             waiting = true
             let bonus = alive*100 + ammo.reduce(0,+)*5 + bestCombo*20
             score += bonus
+            audio.play("wave",enabled:rules.soundEnabled)
             message = "WAVE \(wave) CLEARED +\(bonus) — RETURN FOR NEXT WAVE"
         }
+    }
+    func saveBattle() -> Bool {
+        guard running || waiting else { return false }
+        let battle=SavedBattle(name:"Wave \(wave) • Score \(score)",rules:rules,mode:mode,difficulty:difficulty,
+            hostiles:hostiles,defenses:defenses,bursts:bursts,cities:cities,ammo:ammo,selected:selected,
+            score:score,wave:wave,running:running,waiting:waiting,gameOver:gameOver,
+            combo:combo,bestCombo:bestCombo,totalIntercepts:totalIntercepts,spawned:spawned,
+            spawnTimer:spawnTimer,quota:quota,pattern:pattern,lastWaveBatch:lastWaveBatch,
+            recovery:recovery,gameSeconds:gameSeconds,lastIntercept:lastIntercept)
+        BattleStore.insert(battle)
+        message="GAME SAVED — WAVE \(wave)"
+        return true
+    }
+    func restore(_ b: SavedBattle) {
+        rules=b.rules;mode=b.mode;difficulty=b.difficulty
+        hostiles=b.hostiles;defenses=b.defenses;bursts=b.bursts
+        cities=b.cities;ammo=b.ammo;selected=b.selected;score=b.score;wave=b.wave
+        running=b.running;waiting=b.waiting;gameOver=b.gameOver
+        combo=b.combo;bestCombo=b.bestCombo;totalIntercepts=b.totalIntercepts
+        spawned=b.spawned;spawnTimer=b.spawnTimer;quota=b.quota
+        pattern=b.pattern;assault=b.pattern.rawValue
+        lastWaveBatch=b.lastWaveBatch;recovery=b.recovery
+        gameSeconds=b.gameSeconds;lastIntercept=b.lastIntercept
+        impacts=[];launches=[];nuclear=[];battlePulse=0;hitStreak=0
+        lastTick=nil;paused=true
+        message="RESTORED — PRESS P TO CONTINUE"
     }
     private func spawnEnemy() {
         let targets = cityLocations.indices.filter { cities[$0] }
@@ -272,7 +421,7 @@ private final class BarrageGame: ObservableObject {
         let origin = Point2(x:originX,y:0.02)
         hostiles.append(Hostile(origin:origin,point:origin,
             target:Point2(x:cityLocations[i],y:ground),
-            speed:min(0.19,0.084+Double(wave-1)*0.006)*difficulty.multiplier*Double.random(in:0.88...1.10),
+            speed:min(0.19,0.084+Double(wave-1)*0.006)*difficulty.multiplier*Double(rules.missileSpeed)/100*Double.random(in:0.88...1.10),
             splits:wave >= 3 && (pattern == .mirv ? spawned.isMultiple(of:3) :
                 Int.random(in:0..<100) < min(28,6+wave*2))))
     }
