@@ -1633,9 +1633,9 @@ private struct BarrageWindow: View {
             ctx.stroke(ring,with:.color(blast.hostile ? orange : .white),lineWidth:modern ? 2.8 : 1.7)
         }
         if game.meteorFlash > 0 {
+            let flashOpacity = game.meteorFlash * (game.rules.reducedFlash ? 0.20 : 0.62)
             ctx.fill(Path(CGRect(x:0,y:0,width:w,height:h)),
-                     with:.color(.white.opacity(game.meteorFlash*
-                          (game.rules.reducedFlash ? 0.20 : 0.62))))
+                     with:.color(Color.white.opacity(flashOpacity)))
         }
         if modern && game.battlePulse > 0 {
             let danger=game.impacts.contains(where: { $0.danger && $0.age < 0.24 })
