@@ -4,7 +4,7 @@ Native macOS missile-defense arcade game and fifth built-in Fun City cabinet.
 
 ## Current build
 
-**v1.2.6 — compact Patriot-style battery launchers**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
+**v1.2.7 — proportionally smaller missile batteries**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
 
 - Defend six cities using three selectable interceptor batteries.
 - Enemy missiles, expanding interception zones, chain-reaction scoring and splitting missiles in later waves.
@@ -166,3 +166,7 @@ If a high-score value was saved before initials were introduced, the game now pr
 ## v1.2.6 battery redesign
 
 All three battery graphics have been scaled down by 10% and redrawn as compact Patriot-inspired surface-to-air launcher vehicles. Each now has four angled launch canisters, end caps, actuator and stabilizer supports, radar/communications mast, a control cab and wheels. Their selected-state highlighting and low-ammunition indicators are preserved; gameplay missile launch positions are unchanged.
+
+## v1.2.7 battery scale refinement
+
+Patriot-style launchers are now 20% smaller than v1.2.6 (scaled at 72% of original vector geometry), improving relative scale against city icons. Detail, selection rings, low-ammunition labels and original firing positions remain intact.
