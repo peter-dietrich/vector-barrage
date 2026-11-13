@@ -1293,7 +1293,7 @@ private struct BarrageWindow: View {
                             Text("VECTOR BARRAGE")
                                 .font(.system(size:19,weight:.black,design:.monospaced))
                                 .foregroundStyle(.white)
-                            Text("v1.2.6")
+                            Text("v1.2.7")
                                 .font(.system(size:10,weight:.medium,design:.monospaced))
                                 .foregroundStyle(.gray)
                         }
@@ -1713,8 +1713,8 @@ private struct BarrageWindow: View {
         }
         // Compact Patriot-style surface-to-air defense units: four angled
         // canister tubes, stabilizers, articulated pedestal and control cab.
-        // Entire vehicle silhouette is scaled down by 10%, but the battery's
-        // actual firing origin and hit logic are intentionally unchanged.
+        // Vehicle is 20% smaller than the preceding v1.2.6 model (72% of the
+        // original drawing scale); firing origin and hit logic stay unchanged.
         for i in 0..<3 {
             let x=w*game.batteries[i]
             let armed=i == game.selected
@@ -1724,7 +1724,7 @@ private struct BarrageWindow: View {
                                   (armed ? .white : cyan.opacity(0.80))
             var vehicle=ctx
             vehicle.translateBy(x:x,y:ground)
-            vehicle.scaleBy(x:0.90,y:0.90)
+            vehicle.scaleBy(x:0.72,y:0.72)
             let chassis=Path(roundedRect:CGRect(x:-34,y:-14,width:68,height:14),cornerRadius:2)
             vehicle.fill(chassis,with:.color(Color(red:0.035,green:0.13,blue:0.19)))
             vehicle.stroke(chassis,with:.color(baseInk),lineWidth:1.4)
@@ -1790,7 +1790,7 @@ private struct BarrageWindow: View {
                 ctx.draw(Text(isEmpty ? "EMPTY" : "LOW AMMO")
                     .font(.system(size:10,weight:.heavy,design:.monospaced))
                     .foregroundColor(isEmpty ? .red : .orange),
-                    at:CGPoint(x:x,y:ground-80))
+                    at:CGPoint(x:x,y:ground-68))
             }
         }
         // City destruction: ignition flash, expanding pressure ring,
