@@ -133,8 +133,8 @@ private struct NuclearFX: Identifiable, Codable {
 private struct GameRules: Codable {
     // Defaults are the standard arcade balance. Changes apply on New Game.
     var startingWave = 1
-    var batteryAmmo = 15
-    var ammoGrowth = 2
+    var batteryAmmo = 12
+    var ammoGrowth = 1
     var waveSize = 100
     var missileSpeed = 100
     var missileSpawnRate = 100
@@ -217,6 +217,8 @@ private struct SavedBattle: Codable, Identifiable {
     var bursts: [Burst]
     var cities: [Bool]
     var ammo: [Int]
+    // Optional to preserve older saved battles.
+    var waveOpeningAmmo: [Int]? = nil
     var selected: Int
     var score: Int
     var wave: Int
@@ -373,7 +375,8 @@ private final class BarrageGame: ObservableObject {
     @Published var totalIntercepts = 0
     @Published var assault = "WIDE FRONT"
     @Published var cities = Array(repeating: true, count: 6)
-    @Published var ammo = [15,15,15]
+    @Published var ammo = [12,12,12]
+    @Published var waveOpeningAmmo = [12,12,12]
     @Published var selected = 1
     @Published var score = 0
     @Published var wave = 1
@@ -413,12 +416,17 @@ private final class BarrageGame: ObservableObject {
     private var lastEmptySound = Date.distantPast
     private var streamInterval: Double { 1.0 / Double(max(1,rules.fireRate)) }
     var alive: Int { cities.filter { $0 }.count }
-    // Per-battery loadout grows by two rounds every wave.
-    // A custom starting wave receives the ammunition for that wave.
-    var ammoPerBattery: Int { max(4,min(30,rules.batteryAmmo)) + max(0,wave-1)*rules.ammoGrowth }
-    var lowAmmoThreshold: Int { Int(floor(Double(ammoPerBattery)*Double(rules.lowAmmoPercent)/100)) }
+    // Custom starts at a later wave receive the rounds they would have
+    // earned up to that wave, without assuming any saved unused ammunition.
+    var initialAmmoPerBattery: Int {
+        max(4,min(30,rules.batteryAmmo)) + max(0,wave-1)*max(0,rules.ammoGrowth)
+    }
     func isLowAmmo(_ bank: Int) -> Bool {
-        ammo.indices.contains(bank) && ammo[bank] <= lowAmmoThreshold
+        guard ammo.indices.contains(bank) else { return false }
+        let opening = waveOpeningAmmo.indices.contains(bank) ?
+            waveOpeningAmmo[bank] : initialAmmoPerBattery
+        let threshold = Int(floor(Double(opening)*Double(rules.lowAmmoPercent)/100))
+        return ammo[bank] <= threshold
     }
     // A city inherits the same 25% flight-path threshold as telemetry.
     var threatenedCityIndices: Set<Int> {
@@ -462,12 +470,15 @@ private final class BarrageGame: ObservableObject {
         timeOfDay = rules.randomStartHour ? Double.random(in:0..<24) : Double(rules.startHour)
         scenerySeed = Int.random(in:1...100_000)
         score = 0; wave = max(1,min(20,rules.startingWave)); selected = 1
+        ammo = Array(repeating:initialAmmoPerBattery,count:3)
+        waveOpeningAmmo = ammo
         combo = 0; bestCombo = 0; totalIntercepts = 0; gameSeconds = 0
         running = true; paused = false; gameOver = false; waiting = false
         nextWave()
     }
     private func nextWave() {
-        if wave > max(1,min(20,rules.startingWave)) {
+        let isFirstWave = wave == max(1,min(20,rules.startingWave))
+        if !isFirstWave {
             timeOfDay = (timeOfDay + rules.hoursPerWave).truncatingRemainder(dividingBy:24)
         }
         hostiles = []; defenses = []; bursts = []; impacts = []; launches = []
@@ -486,7 +497,13 @@ private final class BarrageGame: ObservableObject {
         isFiringStream=false; repeatFireTime=0
         atomicShots=[];atomicBursts=[];supplyTruck=nil;bomber=nil;fallingBombs=[];bomberExplosions=[]
         screenShake=0;nextBomberTime=gameSeconds + Double.random(in:13...18)*100/Double(max(25,rules.bomberFrequency))
-        ammo = Array(repeating: ammoPerBattery,count:3)
+        // Keep every unfired round in its existing battery, then issue one
+        // configurable new round to each at every subsequent wave.
+        if !isFirstWave {
+            let issue = max(0,rules.ammoGrowth)
+            ammo = ammo.map { $0 + issue }
+        }
+        waveOpeningAmmo = ammo
         spawned = 0; spawnTimer = 0; recovery = 1.4; lastWaveBatch = -1
         pattern = wave < 2 ? .wide : [.wide,.flank,.cluster,.mirv][(wave-1)%4]
         assault = pattern.rawValue
@@ -897,7 +914,8 @@ private final class BarrageGame: ObservableObject {
     func saveBattle() -> Bool {
         guard running || waiting else { return false }
         let battle=SavedBattle(name:"Wave \(wave) • Score \(score)",rules:rules,mode:mode,difficulty:difficulty,
-            hostiles:hostiles,defenses:defenses,bursts:bursts,cities:cities,ammo:ammo,selected:selected,
+            hostiles:hostiles,defenses:defenses,bursts:bursts,cities:cities,ammo:ammo,
+            waveOpeningAmmo:waveOpeningAmmo,selected:selected,
             score:score,wave:wave,running:running,waiting:waiting,gameOver:gameOver,
             combo:combo,bestCombo:bestCombo,totalIntercepts:totalIntercepts,spawned:spawned,
             spawnTimer:spawnTimer,quota:quota,pattern:pattern,lastWaveBatch:lastWaveBatch,
@@ -914,7 +932,8 @@ private final class BarrageGame: ObservableObject {
     func restore(_ b: SavedBattle) {
         rules=b.rules;mode=b.mode;difficulty=b.difficulty
         hostiles=b.hostiles;defenses=b.defenses;bursts=b.bursts
-        cities=b.cities;ammo=b.ammo;selected=b.selected;score=b.score;wave=b.wave
+        cities=b.cities;ammo=b.ammo;waveOpeningAmmo=b.waveOpeningAmmo ?? b.ammo
+        selected=b.selected;score=b.score;wave=b.wave
         running=b.running;waiting=b.waiting;gameOver=b.gameOver
         combo=b.combo;bestCombo=b.bestCombo;totalIntercepts=b.totalIntercepts
         spawned=b.spawned;spawnTimer=b.spawnTimer;quota=b.quota
@@ -1148,7 +1167,9 @@ private struct CustomGameSettings: View {
                     }
                     Section("Missile Batteries & Defensive Weapons") {
                         counter("Starting ammunition per battery",$rules.batteryAmmo,range:4...30)
-                        counter("Additional rounds per wave",$rules.ammoGrowth,range:0...10)
+                        counter("New rounds per battery each wave",$rules.ammoGrowth,range:0...10)
+                        Text("Unused ammunition carries forward separately for each battery.")
+                            .font(.caption).foregroundStyle(.secondary)
                         counter("Continuous-fire shots per second",$rules.fireRate,range:1...12)
                         percentage("Interceptor travel speed",$rules.interceptorSpeed,range:50...200,step:10)
                         percentage("Interceptor blast radius",$rules.explosionRadius,range:50...180,step:10)
@@ -1249,7 +1270,7 @@ private struct BarrageWindow: View {
                             Text("VECTOR BARRAGE")
                                 .font(.system(size:19,weight:.black,design:.monospaced))
                                 .foregroundStyle(.white)
-                            Text("v1.2.1")
+                            Text("v1.2.2")
                                 .font(.system(size:10,weight:.medium,design:.monospaced))
                                 .foregroundStyle(.gray)
                         }
