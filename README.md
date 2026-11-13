@@ -4,7 +4,7 @@ Native macOS missile-defense arcade game and fifth built-in Fun City cabinet.
 
 ## Current build
 
-**v1.1.1 — ammunition progression**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
+**v1.2.0 — complete Custom Game configuration**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
 
 - Defend six cities using three selectable interceptor batteries.
 - Enemy missiles, expanding interception zones, chain-reaction scoring and splitting missiles in later waves.
@@ -119,3 +119,18 @@ An original game inspired by the classic missile-defense arcade genre. No Atari/
 - Default loadout increased from **12 to 15** interceptors per battery in wave 1.
 - Each new wave adds **2 more rounds per battery** to the replenished loadout: wave 1 = 15, wave 2 = 17, wave 3 = 19, etc. The formula also applies to Custom Games starting in higher waves, using the custom starting ammunition as the wave-1 base.
 - Low ammunition warnings continue to trigger at 20% of each wave's loadout. Saved battles retain their actual remaining rounds.
+
+## v1.2.0 Custom Game controls
+
+The **Custom Game** window is now scrollable and organized by system, with **Restore Defaults**, **Cancel** and **Apply & Start** buttons. Customizing starts a new game. The following gameplay values are editable and saved with each battle:
+
+- **Start conditions:** difficulty, Classic/Modern display, starting wave.
+- **Defenses:** wave-1 ammunition per battery, additional rounds per wave, sustained-fire shots/sec, interceptor velocity, blast radius, three nuclear interceptors on/off, ammo-truck transfer time, third-hit bonus score.
+- **Missile waves:** wave density, enemy speed, enemy spawn frequency, MIRV splitting missiles on/off.
+- **Meteors:** on/off, first wave, distinct interceptor hits needed, breakup fragment quantity, movement speed and encounter frequency.
+- **Bombers:** on/off, first appearance wave, flight speed and appearance frequency.
+- **Alerts:** low ammo percent and incoming missile final-path proximity percent.
+- **Scenery:** dynamic landscape on/off, starfield and drifting clouds on/off, random/fixed start hour and hours advanced between waves.
+- **Effects:** sounds on/off and reduced flash/shake.
+
+The default values preserve the established game balance (15 missiles per battery and +2 each wave, first meteor wave 3, first bomber wave 2, 20% ammo warning, 25% proximity warning). Fixed battlefield structure (three batteries, six cities) is not changeable because the positions and UI are designed around those counts. Existing saves remain readable using defaults for newly introduced controls.
