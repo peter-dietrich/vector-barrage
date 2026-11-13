@@ -72,6 +72,17 @@ private struct StealthBomber: Identifiable, Codable {
     var speed: Double
     var health = 1
     var dropCooldown = 2.5
+    // Optional so earlier saved bombers remain decodable.
+    var releasedCities: [Int]? = nil
+}
+private struct FallingBomb: Identifiable, Codable {
+    var id = UUID()
+    var point: Point2
+    var origin: Point2
+    var velocityX: Double
+    var velocityY: Double
+    var targetCity: Int
+    var elapsed = 0.0
 }
 private struct BomberExplosion: Identifiable {
     var id = UUID()
@@ -144,6 +155,7 @@ private struct SavedBattle: Codable, Identifiable {
     var supplyTruck: SupplyTruck? = nil
     var bomber: StealthBomber? = nil
     var nextBomberTime: Double? = nil
+    var fallingBombs: [FallingBomb]? = nil
 }
 @MainActor
 private enum BattleStore {
@@ -247,6 +259,7 @@ private final class BarrageGame: ObservableObject {
     @Published var atomicBursts: [AtomicDetonation] = []
     @Published var supplyTruck: SupplyTruck?
     @Published var bomber: StealthBomber?
+    @Published var fallingBombs: [FallingBomb] = []
     @Published var bomberExplosions: [BomberExplosion] = []
     @Published var screenShake = 0.0
     private var nextBomberTime = 12.0
@@ -327,7 +340,7 @@ private final class BarrageGame: ObservableObject {
         hitStreak = 0; battlePulse = 0; tripleBonus = nil; lastAlertTone = -100
         isFiringStream=false; repeatFireTime=0
         nuclearAvailable = [true,true,true];atomicShots=[];atomicBursts=[]
-        supplyTruck=nil;bomber=nil;bomberExplosions=[];screenShake=0
+        supplyTruck=nil;bomber=nil;fallingBombs=[];bomberExplosions=[];screenShake=0
         nextBomberTime=12
         cities = Array(repeating: true, count: 6)
         score = 0; wave = max(1,min(20,rules.startingWave)); selected = 1
@@ -339,7 +352,7 @@ private final class BarrageGame: ObservableObject {
         hostiles = []; defenses = []; bursts = []; impacts = []; launches = []
         hitStreak = 0; battlePulse = 0; tripleBonus = nil; lastAlertTone = -100
         isFiringStream=false; repeatFireTime=0
-        atomicShots=[];atomicBursts=[];supplyTruck=nil;bomber=nil;bomberExplosions=[]
+        atomicShots=[];atomicBursts=[];supplyTruck=nil;bomber=nil;fallingBombs=[];bomberExplosions=[]
         screenShake=0;nextBomberTime=gameSeconds + Double.random(in:13...18)
         ammo = Array(repeating: max(4,min(30,rules.batteryAmmo)),count:3)
         spawned = 0; spawnTimer = 0; recovery = 1.4; lastWaveBatch = -1
@@ -500,18 +513,65 @@ private final class BarrageGame: ObservableObject {
         }
         if bomber != nil {
             bomber!.point.x += bomber!.direction*bomber!.speed*dt
-            bomber!.dropCooldown -= dt
-            if bomber!.dropCooldown <= 0 && bomber!.point.x > 0.07 && bomber!.point.x < 0.93 {
-                bomber!.dropCooldown=Double.random(in:2.1...3.4)
-                if let city=cityLocations.indices.filter({cities[$0]}).randomElement() {
-                    let source=bomber!.point
-                    hostiles.append(Hostile(origin:source,point:source,
-                        target:Point2(x:cityLocations[city],y:ground),
-                        speed:0.15*difficulty.multiplier,splits:false))
-                }
+            bomber!.dropCooldown = max(0,bomber!.dropCooldown-dt)
+            // Arcade-scale ballistic release: carry the aircraft's forward
+            // velocity, then accelerate downward under constant gravity.
+            // The bomber drops BEFORE reaching the city, at the point that
+            // predicts the bomb's future horizontal impact at ground level.
+            let gravity=0.30
+            let initialVerticalVelocity = -0.038
+            let altitude=max(0,ground-bomber!.point.y)
+            let flightTime=(-initialVerticalVelocity +
+                sqrt(initialVerticalVelocity*initialVerticalVelocity+2*gravity*altitude))/gravity
+            let forwardVelocity=bomber!.direction*bomber!.speed*0.92
+            let expectedImpactX=bomber!.point.x+forwardVelocity*flightTime
+            let launched=bomber!.releasedCities ?? []
+            let candidates=cityLocations.indices.filter { cities[$0] && !launched.contains($0) }
+            if bomber!.dropCooldown <= 0,
+               let city=candidates.min(by: {
+                   abs(cityLocations[$0]-expectedImpactX) < abs(cityLocations[$1]-expectedImpactX)
+               }),
+               abs(cityLocations[city]-expectedImpactX) <= 0.025 {
+                let release=Point2(x:bomber!.point.x,y:bomber!.point.y+0.025)
+                fallingBombs.append(FallingBomb(point:release,origin:release,
+                    velocityX:forwardVelocity,velocityY:initialVerticalVelocity,targetCity:city))
+                bomber!.releasedCities=(bomber!.releasedCities ?? [])+[city]
+                bomber!.dropCooldown=0.78
+                message="BOMBS AWAY — CITY \(city+1)"
+                audio.play("bomber",enabled:rules.soundEnabled)
             }
             if bomber!.point.x < -0.14 || bomber!.point.x > 1.14 { bomber=nil }
         }
+        // Integrate independent bomb trajectories continuously. Normal
+        // interceptor explosions destroy bombs before they hit the ground.
+        var survivingBombs: [FallingBomb] = []
+        for var bomb in fallingBombs {
+            bomb.elapsed += dt
+            bomb.point.x += bomb.velocityX*dt
+            bomb.velocityY += 0.30*dt
+            bomb.point.y += bomb.velocityY*dt
+            if bomb.point.y >= ground {
+                if cities.indices.contains(bomb.targetCity) && cities[bomb.targetCity] {
+                    cities[bomb.targetCity]=false
+                    nuclear.append(NuclearFX(point:Point2(x:cityLocations[bomb.targetCity],y:ground)))
+                    audio.play("city",enabled:rules.soundEnabled)
+                    combo=0
+                    battlePulse=max(battlePulse,0.75)
+                    message="BOMBER STRIKE — CITY \(bomb.targetCity+1) LOST"
+                }
+                impacts.append(ImpactFX(point:bomb.point,danger:true,points:0))
+            } else if bursts.contains(where: {
+                !$0.hostile && $0.radius > 0 && $0.point.distance(bomb.point) <= $0.radius
+            }) {
+                score += 50
+                totalIntercepts += 1
+                impacts.append(ImpactFX(point:bomb.point,danger:false,points:50))
+                audio.play("hit",enabled:rules.soundEnabled)
+            } else {
+                survivingBombs.append(bomb)
+            }
+        }
+        fallingBombs=survivingBombs
         if tripleBonus != nil {
             tripleBonus!.age += dt
             if tripleBonus!.age >= 1.65 { tripleBonus = nil }
@@ -643,7 +703,7 @@ private final class BarrageGame: ObservableObject {
         if alive == 0 {
             running = false; gameOver = true
             message = "GAME OVER — SCORE \(score)"
-        } else if spawned >= quota && hostiles.isEmpty && defenses.isEmpty && bomber == nil && atomicShots.isEmpty {
+        } else if spawned >= quota && hostiles.isEmpty && fallingBombs.isEmpty && defenses.isEmpty && bomber == nil && atomicShots.isEmpty {
             waiting = true
             let bonus = alive*100 + ammo.reduce(0,+)*5 + bestCombo*20
             score += bonus
@@ -660,7 +720,8 @@ private final class BarrageGame: ObservableObject {
             spawnTimer:spawnTimer,quota:quota,pattern:pattern,lastWaveBatch:lastWaveBatch,
             recovery:recovery,gameSeconds:gameSeconds,lastIntercept:lastIntercept,
             nuclearAvailable:nuclearAvailable,atomicShots:atomicShots,
-            supplyTruck:supplyTruck,bomber:bomber,nextBomberTime:nextBomberTime)
+            supplyTruck:supplyTruck,bomber:bomber,nextBomberTime:nextBomberTime,
+            fallingBombs:fallingBombs)
         BattleStore.insert(battle)
         message="GAME SAVED — WAVE \(wave)"
         return true
@@ -679,6 +740,7 @@ private final class BarrageGame: ObservableObject {
         atomicShots=b.atomicShots ?? []
         supplyTruck=b.supplyTruck
         bomber=b.bomber
+        fallingBombs=b.fallingBombs ?? []
         nextBomberTime=b.nextBomberTime ?? (gameSeconds+15)
         bomberExplosions=[];atomicBursts=[];screenShake=0
         impacts=[];launches=[];nuclear=[];tripleBonus=nil;lastAlertTone = -100
@@ -722,7 +784,7 @@ private struct BarrageWindow: View {
         VStack(spacing:0) {
             HStack(spacing:14) {
                 Text("VECTOR BARRAGE").font(.system(size:16,weight:.heavy,design:.monospaced)).tracking(2)
-                Text("v0.8.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
+                Text("v0.9.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
                 Spacer()
                 Picker("Display",selection:$game.mode) {
                     ForEach(VisualMode.allCases) { Text($0.rawValue).tag($0) }
