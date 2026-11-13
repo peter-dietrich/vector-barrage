@@ -1293,7 +1293,7 @@ private struct BarrageWindow: View {
                             Text("VECTOR BARRAGE")
                                 .font(.system(size:19,weight:.black,design:.monospaced))
                                 .foregroundStyle(.white)
-                            Text("v1.2.5")
+                            Text("v1.2.6")
                                 .font(.system(size:10,weight:.medium,design:.monospaced))
                                 .foregroundStyle(.gray)
                         }
@@ -1711,42 +1711,86 @@ private struct BarrageWindow: View {
                 }
             }
         }
+        // Compact Patriot-style surface-to-air defense units: four angled
+        // canister tubes, stabilizers, articulated pedestal and control cab.
+        // Entire vehicle silhouette is scaled down by 10%, but the battery's
+        // actual firing origin and hit logic are intentionally unchanged.
         for i in 0..<3 {
             let x=w*game.batteries[i]
             let armed=i == game.selected
             let lowAmmo=game.isLowAmmo(i)
-            let baseInk:Color=lowAmmo ? (game.ammo[i] == 0 ? .red : .orange) :
-                                  (armed ? .white : cyan.opacity(0.78))
-            let bunker=CGRect(x:x-27,y:ground-14,width:54,height:14)
-            ctx.fill(Path(bunker),with:.color(Color(red:0.04,green:0.14,blue:0.19)))
-            ctx.stroke(Path(bunker),with:.color(baseInk),lineWidth:1.4)
-            var hull=Path()
-            hull.move(to:CGPoint(x:x-22,y:ground-14))
-            hull.addLine(to:CGPoint(x:x-16,y:ground-29))
-            hull.addLine(to:CGPoint(x:x-6,y:ground-37))
-            hull.addLine(to:CGPoint(x:x+6,y:ground-37))
-            hull.addLine(to:CGPoint(x:x+16,y:ground-29))
-            hull.addLine(to:CGPoint(x:x+22,y:ground-14))
-            hull.closeSubpath()
-            ctx.fill(hull,with:.color(Color(red:0.065,green:0.17,blue:0.23)))
-            ctx.stroke(hull,with:.color(baseInk),lineWidth:armed ? 2.1 : 1.4)
-            // Articulated launcher on a raised platform.
-            line(CGPoint(x:x,y:ground-36),CGPoint(x:x,y:ground-48),baseInk,3)
-            line(CGPoint(x:x-9,y:ground-26),CGPoint(x:x+9,y:ground-26),baseInk.opacity(0.7),1)
-            for p in [-18.0,18.0] {
-                ctx.fill(Path(ellipseIn:CGRect(x:x+p-2,y:ground-9,width:4,height:4)),
-                         with:.color(lowAmmo ? .red : (armed ? .orange : cyan.opacity(0.4))))
+            let isEmpty=game.ammo[i] == 0
+            let baseInk:Color=lowAmmo ? (isEmpty ? .red : .orange) :
+                                  (armed ? .white : cyan.opacity(0.80))
+            var vehicle=ctx
+            vehicle.translateBy(x:x,y:ground)
+            vehicle.scaleBy(x:0.90,y:0.90)
+            let chassis=Path(roundedRect:CGRect(x:-34,y:-14,width:68,height:14),cornerRadius:2)
+            vehicle.fill(chassis,with:.color(Color(red:0.035,green:0.13,blue:0.19)))
+            vehicle.stroke(chassis,with:.color(baseInk),lineWidth:1.4)
+            // Six-wheel platform and mechanical suspension.
+            for wheelX in [-26.0,-16.0,16.0,26.0] {
+                let wheel=Path(ellipseIn:CGRect(x:wheelX-4,y:-7,width:8,height:8))
+                vehicle.fill(wheel,with:.color(Color(red:0.018,green:0.05,blue:0.07)))
+                vehicle.stroke(wheel,with:.color(baseInk.opacity(0.78)),lineWidth:1)
             }
-            // Selected battery is obvious without a large distracting glow.
+            // Electronics/control unit with narrow side window.
+            let cab=Path(roundedRect:CGRect(x:-32,y:-27,width:17,height:13),cornerRadius:2)
+            vehicle.fill(cab,with:.color(Color(red:0.07,green:0.20,blue:0.25)))
+            vehicle.stroke(cab,with:.color(baseInk),lineWidth:1.1)
+            vehicle.fill(Path(CGRect(x:-28,y:-24,width:9,height:4)),
+                         with:.color(cyan.opacity(0.50)))
+            // Stabilizer legs and turntable.
+            var stabilizers=Path()
+            stabilizers.move(to:CGPoint(x:-25,y:-12))
+            stabilizers.addLine(to:CGPoint(x:-40,y:-3))
+            stabilizers.move(to:CGPoint(x:25,y:-12))
+            stabilizers.addLine(to:CGPoint(x:40,y:-3))
+            vehicle.stroke(stabilizers,with:.color(baseInk.opacity(0.65)),lineWidth:1.5)
+            vehicle.fill(Path(CGRect(x:-13,y:-21,width:26,height:5)),
+                         with:.color(Color(red:0.09,green:0.24,blue:0.30)))
+            var strut=Path()
+            strut.move(to:CGPoint(x:-5,y:-21))
+            strut.addLine(to:CGPoint(x:4,y:-37))
+            strut.addLine(to:CGPoint(x:17,y:-34))
+            vehicle.stroke(strut,with:.color(baseInk),lineWidth:2.2)
+            // Four stacked sealed launch canisters rise at a modest angle.
+            // Drawn in side profile rather than as a generic upright bunker.
+            for tube in 0..<4 {
+                let vertical=CGFloat(tube)*5.9
+                var canister=Path()
+                canister.move(to:CGPoint(x:-5,y:-34-vertical))
+                canister.addLine(to:CGPoint(x:8,y:-59-vertical))
+                canister.addLine(to:CGPoint(x:17,y:-55-vertical))
+                canister.addLine(to:CGPoint(x:4,y:-30-vertical))
+                canister.closeSubpath()
+                vehicle.fill(canister,with:.color(Color(red:0.075,green:0.18,blue:0.23)))
+                vehicle.stroke(canister,with:.color(baseInk),lineWidth:1.25)
+                // Metallic end cap and latch detail on each tube.
+                var cap=Path()
+                cap.move(to:CGPoint(x:8,y:-59-vertical))
+                cap.addLine(to:CGPoint(x:17,y:-55-vertical))
+                vehicle.stroke(cap,with:.color(armed ? .white : cyan.opacity(0.56)),lineWidth:2)
+            }
+            // Radar/communications mast and ready-status lamp.
+            var aerial=Path()
+            aerial.move(to:CGPoint(x:-25,y:-27))
+            aerial.addLine(to:CGPoint(x:-25,y:-41))
+            aerial.move(to:CGPoint(x:-30,y:-38))
+            aerial.addLine(to:CGPoint(x:-20,y:-38))
+            vehicle.stroke(aerial,with:.color(baseInk.opacity(0.70)),lineWidth:1)
+            vehicle.fill(Path(ellipseIn:CGRect(x:-27,y:-44,width:4,height:4)),
+                         with:.color(lowAmmo ? .red : .green))
             if armed {
-                ctx.stroke(Path(ellipseIn:CGRect(x:x-32,y:ground-54,width:64,height:48)),
-                           with:.color(lowAmmo ? .orange.opacity(0.85) : cyan.opacity(0.32)),lineWidth:1.8)
+                vehicle.stroke(Path(ellipseIn:CGRect(x:-45,y:-76,width:90,height:83)),
+                               with:.color(lowAmmo ? .orange.opacity(0.72) : cyan.opacity(0.34)),
+                               lineWidth:1.4)
             }
             if lowAmmo {
-                ctx.draw(Text(game.ammo[i] == 0 ? "EMPTY" : "LOW AMMO")
+                ctx.draw(Text(isEmpty ? "EMPTY" : "LOW AMMO")
                     .font(.system(size:10,weight:.heavy,design:.monospaced))
-                    .foregroundColor(game.ammo[i] == 0 ? .red : .orange),
-                    at:CGPoint(x:x,y:ground-65))
+                    .foregroundColor(isEmpty ? .red : .orange),
+                    at:CGPoint(x:x,y:ground-80))
             }
         }
         // City destruction: ignition flash, expanding pressure ring,
