@@ -379,6 +379,15 @@ private final class BarrageGame: ObservableObject {
     @Published var waveOpeningAmmo = [12,12,12]
     @Published var selected = 1
     @Published var highScore = UserDefaults.standard.integer(forKey:"VectorBarrage.highScore.v1")
+    @Published var highScoreInitials = UserDefaults.standard.string(forKey:"VectorBarrage.highScoreInitials.v1") ?? "---"
+    private(set) var recordToBeat = UserDefaults.standard.integer(forKey:"VectorBarrage.highScore.v1")
+    func registerHighScoreInitials(_ raw: String) {
+        let initials=String(raw.uppercased().filter { $0.isLetter }.prefix(3))
+        guard !initials.isEmpty && gameOver && score >= highScore && score > recordToBeat else { return }
+        highScoreInitials=initials
+        UserDefaults.standard.set(initials,forKey:"VectorBarrage.highScoreInitials.v1")
+        recordToBeat=highScore
+    }
     @Published var score = 0 {
         didSet {
             if score > highScore {
@@ -465,6 +474,7 @@ private final class BarrageGame: ObservableObject {
     var proximityPulseOn: Bool { Int(gameSeconds*3).isMultiple(of:2) }
 
     func start() {
+        recordToBeat=highScore
         hostiles = []; defenses = []; bursts = []; launches = []
         hitStreak = 0; battlePulse = 0; tripleBonus = nil; lastAlertTone = -100
         isFiringStream=false; repeatFireTime=0
@@ -939,6 +949,7 @@ private final class BarrageGame: ObservableObject {
     }
     func restore(_ b: SavedBattle) {
         rules=b.rules;mode=b.mode;difficulty=b.difficulty
+        recordToBeat=highScore
         hostiles=b.hostiles;defenses=b.defenses;bursts=b.bursts
         cities=b.cities;ammo=b.ammo;waveOpeningAmmo=b.waveOpeningAmmo ?? b.ammo
         selected=b.selected;score=b.score;wave=b.wave
@@ -1266,6 +1277,8 @@ private struct BarrageWindow: View {
     @State private var showSaved = false
     @State private var savedBattles: [SavedBattle] = []
     @State private var saveNotice = ""
+    @State private var showInitialsEntry = false
+    @State private var initialsEntry = ""
     @State private var editRules = GameRules()
     @State private var editMode: VisualMode = .modern
     @State private var editDifficulty: Difficulty = .veteran
@@ -1278,7 +1291,7 @@ private struct BarrageWindow: View {
                             Text("VECTOR BARRAGE")
                                 .font(.system(size:19,weight:.black,design:.monospaced))
                                 .foregroundStyle(.white)
-                            Text("v1.2.3")
+                            Text("v1.2.4")
                                 .font(.system(size:10,weight:.medium,design:.monospaced))
                                 .foregroundStyle(.gray)
                         }
@@ -1366,7 +1379,7 @@ private struct BarrageWindow: View {
             HStack(spacing:12) {
                 Text("SCORE \(game.score)")
                     .monospacedDigit()
-                Text("HIGH \(game.highScore)")
+                Text("HIGH \(game.highScore)  \(game.highScoreInitials)")
                     .monospacedDigit()
                     .foregroundStyle(.cyan)
                     .monospacedDigit()
@@ -1405,6 +1418,40 @@ private struct BarrageWindow: View {
             .background(Color(white:0.075))
         }
         .onReceive(clock) { game.tick($0) }
+        .onChange(of:game.gameOver) { ended in
+            if ended && game.score > game.recordToBeat && game.score > 0 {
+                initialsEntry=""
+                showInitialsEntry=true
+            }
+        }
+        .sheet(isPresented:$showInitialsEntry) {
+            VStack(alignment:.leading,spacing:14) {
+                Text("NEW HIGH SCORE")
+                    .font(.system(size:23,weight:.black,design:.monospaced))
+                    .foregroundStyle(.cyan)
+                Text(String(format:"%06d",game.score))
+                    .font(.system(size:36,weight:.heavy,design:.monospaced))
+                Text("Enter your initials (up to 3 letters)")
+                    .foregroundStyle(.secondary)
+                TextField("ABC",text:$initialsEntry)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size:25,weight:.heavy,design:.monospaced))
+                    .onChange(of:initialsEntry) { value in
+                        initialsEntry=String(value.uppercased().filter { $0.isLetter }.prefix(3))
+                    }
+                HStack {
+                    Spacer()
+                    Button("Save High Score") {
+                        game.registerHighScoreInitials(initialsEntry)
+                        showInitialsEntry=false
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(initialsEntry.isEmpty)
+                }
+            }
+            .padding(26).frame(width:375)
+            .interactiveDismissDisabled()
+        }
         .sheet(isPresented:$showCustom) {
             CustomGameSettings(rules:$editRules,mode:$editMode,difficulty:$editDifficulty,
                                onCancel:{showCustom=false},
@@ -2095,7 +2142,7 @@ private struct BarrageTelemetry: View {
                         .font(.system(size:9,weight:.medium,design:.monospaced))
                         .foregroundStyle(muted)
                     Spacer(minLength:0)
-                    Text(String(format:"%06d",game.highScore))
+                    Text(String(format:"%06d",game.highScore) + " " + game.highScoreInitials)
                         .font(.system(size:14,weight:.bold,design:.monospaced))
                         .monospacedDigit()
                         .foregroundStyle(amber)
