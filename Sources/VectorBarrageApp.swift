@@ -1490,6 +1490,15 @@ private struct BarrageTelemetry: View {
                 rule
                 label("CURRENT WAVE")
                 big(String(format: "%02d",game.wave),size:28)
+                HStack(spacing:4) {
+                    Text(game.dayPeriod)
+                        .foregroundStyle(amber)
+                    Spacer(minLength:1)
+                    Text(game.timeLabel)
+                        .foregroundStyle(ice)
+                }
+                .font(.system(size:10,weight:.bold,design:.monospaced))
+                .padding(.top,4)
                 rule
                 label("DEFENSE STATUS")
                 big(String(format: "%02d / 06",game.alive),size:21)
