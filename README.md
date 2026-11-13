@@ -4,7 +4,7 @@ Native macOS missile-defense arcade game and fifth built-in Fun City cabinet.
 
 ## Current build
 
-**v0.8.0 — continuous fire, live low-ammo and city warnings, varied missile speed**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
+**v0.9.0 — side-profile stealth bombers and ballistic bomb runs**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
 
 - Defend six cities using three selectable interceptor batteries.
 - Enemy missiles, expanding interception zones, chain-reaction scoring and splitting missiles in later waves.
@@ -88,3 +88,11 @@ An original game inspired by the classic missile-defense arcade genre. No Atari/
 - Cities being targeted by an incoming missile in the final 25% of its flight path switch to orange/red and show an animated threat outline, synchronized with the proximity warning on telemetry. Alerts clear when the missile is destroyed.
 - Each wave increases the potential speed and random speed spread of incoming missiles, capped to maintain playable response times.
 - Previously created save slots remain readable; settings and truck redistribution continue to influence ammo warnings.
+
+## v0.9.0 bomber improvements
+
+- Stealth bombers are now recognizable **side-profile** flying-wing aircraft (mirrored to match their direction of travel) with a nose, cockpit, wing, engine outlets and bomb bay.
+- Bombs use an independent gravity-driven **forward-and-downward arc**. They inherit horizontal aircraft velocity and accelerate toward the ground; they are no longer rendered or moved as diagonal homing missiles.
+- Bomb releases are timed **before the aircraft reaches the target**, using a predicted ballistic landing point and the city locations. Each city is targeted at most once per bomber pass, and shots are spaced to avoid rapid-fire bomb spam.
+- Falling bombs can be shot down by expanding player interceptor blast zones and earn 50 points; unopposed hits trigger normal city-destruction effects.
+- Falling bomb positions/velocities are included in local saved battles; older save slots remain readable.
