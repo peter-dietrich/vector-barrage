@@ -378,7 +378,15 @@ private final class BarrageGame: ObservableObject {
     @Published var ammo = [12,12,12]
     @Published var waveOpeningAmmo = [12,12,12]
     @Published var selected = 1
-    @Published var score = 0
+    @Published var highScore = UserDefaults.standard.integer(forKey:"VectorBarrage.highScore.v1")
+    @Published var score = 0 {
+        didSet {
+            if score > highScore {
+                highScore = score
+                UserDefaults.standard.set(score,forKey:"VectorBarrage.highScore.v1")
+            }
+        }
+    }
     @Published var wave = 1
     @Published var running = false
     @Published var paused = false
@@ -1270,7 +1278,7 @@ private struct BarrageWindow: View {
                             Text("VECTOR BARRAGE")
                                 .font(.system(size:19,weight:.black,design:.monospaced))
                                 .foregroundStyle(.white)
-                            Text("v1.2.2")
+                            Text("v1.2.3")
                                 .font(.system(size:10,weight:.medium,design:.monospaced))
                                 .foregroundStyle(.gray)
                         }
@@ -1357,6 +1365,10 @@ private struct BarrageWindow: View {
             }
             HStack(spacing:12) {
                 Text("SCORE \(game.score)")
+                    .monospacedDigit()
+                Text("HIGH \(game.highScore)")
+                    .monospacedDigit()
+                    .foregroundStyle(.cyan)
                     .monospacedDigit()
                 Text("WAVE \(game.wave)")
                     .monospacedDigit()
@@ -2078,6 +2090,16 @@ private struct BarrageTelemetry: View {
                 Spacer().frame(height: 15)
                 label("CURRENT SCORE")
                 big(String(format: "%06d",game.score),size:28)
+                HStack(spacing:6) {
+                    Text("HIGH SCORE")
+                        .font(.system(size:9,weight:.medium,design:.monospaced))
+                        .foregroundStyle(muted)
+                    Spacer(minLength:0)
+                    Text(String(format:"%06d",game.highScore))
+                        .font(.system(size:14,weight:.bold,design:.monospaced))
+                        .monospacedDigit()
+                        .foregroundStyle(amber)
+                }.padding(.top,5)
                 rule
                 label("CURRENT WAVE")
                 big(String(format: "%02d",game.wave),size:28)
