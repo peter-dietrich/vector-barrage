@@ -430,11 +430,16 @@ private final class BarrageGame: ObservableObject {
 private struct BarrageWindow: View {
     @StateObject private var game = BarrageGame()
     private let clock = Timer.publish(every:1.0/60.0,on:.main,in:.common).autoconnect()
+    @State private var showCustom = false
+    @State private var showSaved = false
+    @State private var savedBattles: [SavedBattle] = []
+    @State private var saveNotice = ""
+    @State private var editRules = GameRules()
     var body: some View {
         VStack(spacing:0) {
             HStack(spacing:14) {
                 Text("VECTOR BARRAGE").font(.system(size:16,weight:.heavy,design:.monospaced)).tracking(2)
-                Text("v0.4.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
+                Text("v0.5.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
                 Spacer()
                 Picker("Display",selection:$game.mode) {
                     ForEach(VisualMode.allCases) { Text($0.rawValue).tag($0) }
@@ -442,7 +447,16 @@ private struct BarrageWindow: View {
                 Picker("Level",selection:$game.difficulty) {
                     ForEach(Difficulty.allCases) { Text($0.rawValue).tag($0) }
                 }.frame(width:140)
-                Button(game.paused ? "Resume" : "Pause") { game.togglePause() }
+                Toggle(isOn: $game.rules.soundEnabled) {
+                    Image(systemName:game.rules.soundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                }.toggleStyle(.button).help("Arcade sound effects")
+                Button("Custom Game") { editRules=game.rules;showCustom=true }
+                Button("Save Game") {
+                    if game.saveBattle() { saveNotice="Battle saved." }
+                    else { saveNotice="Start a battle before saving." }
+                }
+                Button("Resume") { savedBattles=BattleStore.list();showSaved=true }
+                Button(game.paused ? "Unpause" : "Pause") { game.togglePause() }
                 Button("New Game") { game.start() }
             }
             .controlSize(.small).padding(.horizontal,16).frame(height:56)
@@ -490,6 +504,66 @@ private struct BarrageWindow: View {
             .padding(.horizontal,16).frame(height:30).background(.black)
         }
         .onReceive(clock) { game.tick($0) }
+        .sheet(isPresented:$showCustom) {
+            VStack(alignment:.leading,spacing:16) {
+                Text("CUSTOM GAME").font(.system(.title2,design:.monospaced).bold())
+                Text("Apply these rules to a new battle. Current progress will restart.")
+                    .foregroundStyle(.secondary)
+                Stepper("Starting wave: \(editRules.startingWave)",value:$editRules.startingWave,in:1...20)
+                Stepper("Interceptors per battery: \(editRules.batteryAmmo)",value:$editRules.batteryAmmo,in:4...30)
+                VStack(alignment:.leading) {
+                    Text("Incoming missiles per wave: \(editRules.waveSize)%")
+                    Slider(value:Binding(get:{Double(editRules.waveSize)},set:{editRules.waveSize=Int($0)}),
+                           in:50...175,step:25)
+                }
+                VStack(alignment:.leading) {
+                    Text("Incoming missile speed: \(editRules.missileSpeed)%")
+                    Slider(value:Binding(get:{Double(editRules.missileSpeed)},set:{editRules.missileSpeed=Int($0)}),
+                           in:60...150,step:10)
+                }
+                Toggle("Arcade sounds",isOn:$editRules.soundEnabled)
+                Toggle("Reduce bright flashes",isOn:$editRules.reducedFlash)
+                HStack {
+                    Button("Cancel") { showCustom=false }
+                    Spacer()
+                    Button("Apply & Start") { game.rules=editRules;game.start();showCustom=false }
+                        .buttonStyle(.borderedProminent)
+                }
+            }.padding(24).frame(width:440)
+        }
+        .sheet(isPresented:$showSaved) {
+            VStack(alignment:.leading,spacing:12) {
+                Text("SAVED BATTLES").font(.system(.title2,design:.monospaced).bold())
+                Text("Restore your defenses, missile positions, scores and wave progress.")
+                    .foregroundStyle(.secondary)
+                if savedBattles.isEmpty { Text("No saved battles yet.").foregroundStyle(.secondary) }
+                ScrollView {
+                    VStack(spacing:8) {
+                        ForEach(savedBattles) { battle in
+                            HStack {
+                                VStack(alignment:.leading,spacing:3) {
+                                    Text(battle.name).font(.headline)
+                                    Text(battle.savedAt.formatted()).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Load") { game.restore(battle);showSaved=false }
+                                    .buttonStyle(.borderedProminent)
+                                Button("Delete",role:.destructive) {
+                                    BattleStore.delete(battle.id)
+                                    savedBattles=BattleStore.list()
+                                }
+                            }.padding(7)
+                            Divider()
+                        }
+                    }
+                }
+                Button("Close") { showSaved=false }
+            }.padding(22).frame(width:530,height:430)
+        }
+        .alert("VECTOR BARRAGE",isPresented:Binding(
+            get:{!saveNotice.isEmpty},set:{if !$0 {saveNotice=""}})) {
+                Button("OK") {saveNotice=""}
+            } message: {Text(saveNotice)}
     }
     private func draw(context: GraphicsContext, size: CGSize) {
         var ctx = context
@@ -561,32 +635,38 @@ private struct BarrageWindow: View {
         line(CGPoint(x:0,y:ground),CGPoint(x:w,y:ground),cyan,2)
         for i in 0..<6 {
             let x=w*game.cityLocations[i]
+            // Uniform 10% increase in city footprint and height around ground.
+            let cityScale:CGFloat=1.10
+            var cityCtx=ctx
+            cityCtx.translateBy(x:x,y:ground)
+            cityCtx.scaleBy(x:cityScale,y:cityScale)
+            cityCtx.translateBy(x:-x,y:-ground)
             let ink:Color=modern ? cyan : .green
             if game.cities[i] {
                 let pedestal=CGRect(x:x-24,y:ground-6,width:48,height:6)
-                ctx.fill(Path(pedestal),with:.color(Color(red:0.06,green:0.23,blue:0.30)))
-                ctx.stroke(Path(pedestal),with:.color(ink.opacity(0.72)),lineWidth:1)
+                cityCtx.fill(Path(pedestal),with:.color(Color(red:0.06,green:0.23,blue:0.30)))
+                cityCtx.stroke(Path(pedestal),with:.color(ink.opacity(0.72)),lineWidth:1)
                 // Each city has its own skyscraper heights and architectural detail.
                 let heights:[CGFloat]=[18,30,23,41,25,19]
                 for j in 0..<6 {
                     let buildingHeight=heights[(j+i*2)%heights.count]
                     let rect=CGRect(x:x-22+CGFloat(j)*7.4,y:ground-6-buildingHeight,
                                     width:6.5,height:buildingHeight)
-                    ctx.fill(Path(rect),with:.color(Color(red:0.035,green:0.12,blue:0.20).opacity(modern ? 0.95 : 0.6)))
-                    ctx.stroke(Path(rect),with:.color(ink.opacity(modern ? 0.86 : 1)),lineWidth:1)
+                    cityCtx.fill(Path(rect),with:.color(Color(red:0.035,green:0.12,blue:0.20).opacity(modern ? 0.95 : 0.6)))
+                    cityCtx.stroke(Path(rect),with:.color(ink.opacity(modern ? 0.86 : 1)),lineWidth:1)
                     if modern {
                         for k in 0..<Int(buildingHeight/9) {
                             let window=CGRect(x:rect.minX+2,y:rect.maxY-6-CGFloat(k)*8,width:2,height:2)
-                            ctx.fill(Path(window),with:.color(Color(red:0.99,green:0.76,blue:0.37).opacity(0.65)))
+                            cityCtx.fill(Path(window),with:.color(Color(red:0.99,green:0.76,blue:0.37).opacity(0.65)))
                         }
                     }
                 }
                 // Command antenna on the tallest local tower.
                 line(CGPoint(x:x+0.5,y:ground-47),CGPoint(x:x+0.5,y:ground-54),ink,1.1)
-                ctx.fill(Path(ellipseIn:CGRect(x:x-1.2,y:ground-56,width:3,height:3)),
+                cityCtx.fill(Path(ellipseIn:CGRect(x:x-1.2,y:ground-56,width:3,height:3)),
                          with:.color(.orange))
             } else {
-                ctx.fill(Path(CGRect(x:x-22,y:ground-5,width:44,height:5)),
+                cityCtx.fill(Path(CGRect(x:x-22,y:ground-5,width:44,height:5)),
                          with:.color(.red.opacity(0.22)))
                 for j in 0..<5 {
                     let left=x-19+CGFloat(j)*9
@@ -624,6 +704,48 @@ private struct BarrageWindow: View {
             if armed {
                 ctx.stroke(Path(ellipseIn:CGRect(x:x-32,y:ground-54,width:64,height:48)),
                            with:.color(cyan.opacity(0.32)),lineWidth:1)
+            }
+        }
+        // City destruction: ignition flash, expanding pressure ring,
+        // towering mushroom cloud and numerous deterministic debris fragments.
+        for detonation in game.nuclear {
+            let p=point(detonation.point)
+            let t=detonation.age
+            let life=max(0.0,1.0-t/2.6)
+            let rise=CGFloat(min(1.0,t/1.5))*h*0.39
+            let blastRadius=CGFloat(14+t*160)
+            let fire=Color(red:1,green:0.52,blue:0.10)
+            let outer=Path(ellipseIn:CGRect(x:p.x-blastRadius,y:p.y-blastRadius,
+                                             width:2*blastRadius,height:2*blastRadius))
+            ctx.stroke(outer,with:.color(.white.opacity(life*0.92)),lineWidth:4)
+            ctx.stroke(Path(ellipseIn:CGRect(x:p.x-blastRadius*0.80,y:p.y-blastRadius*0.80,
+                             width:blastRadius*1.6,height:blastRadius*1.6)),
+                       with:.color(fire.opacity(life*0.75)),lineWidth:6)
+            let stem=CGRect(x:p.x-18-CGFloat(t)*11,y:p.y-rise*0.85,
+                            width:36+CGFloat(t)*22,height:rise*0.85)
+            ctx.fill(Path(roundedRect:stem,cornerRadius:15),
+                     with:.color(fire.opacity(life*0.5)))
+            let cloudWidth=CGFloat(42+t*58)
+            let cloud=CGRect(x:p.x-cloudWidth,y:p.y-rise-cloudWidth*0.38,
+                             width:cloudWidth*2,height:cloudWidth*0.8)
+            ctx.fill(Path(ellipseIn:cloud),
+                     with:.radialGradient(Gradient(colors:[
+                        .white.opacity(life*0.88),Color.yellow.opacity(life*0.78),
+                        fire.opacity(life*0.55),.clear]),
+                        center:CGPoint(x:p.x,y:p.y-rise),startRadius:0,endRadius:cloudWidth))
+            for n in 0..<32 {
+                let angle=Double(n)*2*Double.pi/32
+                let spread=CGFloat(28+t*Double(50+(n*19)%125))
+                let px=p.x+CGFloat(cos(angle))*spread
+                let py=p.y+CGFloat(sin(angle))*spread*0.78-CGFloat(t)*20
+                let part=Path(ellipseIn:CGRect(x:px-2.4,y:py-2.4,width:4.8,height:4.8))
+                ctx.fill(part,with:.color((n.isMultiple(of:3) ? Color.white : fire).opacity(life)))
+            }
+            if t < 0.55 {
+                let flashEnvelope=pow(max(0,1-t/0.55),1.7)
+                let maxAlpha=game.rules.reducedFlash ? 0.16 : 0.80
+                ctx.fill(Path(CGRect(x:0,y:0,width:w,height:h)),
+                         with:.color(.white.opacity(maxAlpha*flashEnvelope)))
             }
         }
         // Larger, short-lived impact signatures give immediate kill confirmation.
