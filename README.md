@@ -4,7 +4,7 @@ Native macOS missile-defense arcade game and fifth built-in Fun City cabinet.
 
 ## Current build
 
-**v1.2.5 — claim legacy high-score initials**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
+**v1.2.6 — compact Patriot-style battery launchers**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
 
 - Defend six cities using three selectable interceptor batteries.
 - Enemy missiles, expanding interception zones, chain-reaction scoring and splitting missiles in later waves.
@@ -162,3 +162,7 @@ After a new all-time high-score run ends, the player enters up to three uppercas
 ## v1.2.5 — claim existing records
 
 If a high-score value was saved before initials were introduced, the game now prompts for initials on launch and includes a **Claim High Score** button in the top toolbar until claimed. The initials are saved to the existing record without requiring the player to beat it again. Future records still prompt when the run ends. The stored score is not reset.
+
+## v1.2.6 battery redesign
+
+All three battery graphics have been scaled down by 10% and redrawn as compact Patriot-inspired surface-to-air launcher vehicles. Each now has four angled launch canisters, end caps, actuator and stabilizer supports, radar/communications mast, a control cab and wheels. Their selected-state highlighting and low-ammunition indicators are preserved; gameplay missile launch positions are unchanged.
