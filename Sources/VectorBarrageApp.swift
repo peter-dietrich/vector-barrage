@@ -156,6 +156,8 @@ private struct SavedBattle: Codable, Identifiable {
     var bomber: StealthBomber? = nil
     var nextBomberTime: Double? = nil
     var fallingBombs: [FallingBomb]? = nil
+    var timeOfDay: Double? = nil
+    var scenerySeed: Int? = nil
 }
 @MainActor
 private enum BattleStore {
@@ -286,6 +288,17 @@ private final class BarrageGame: ObservableObject {
     @Published var difficulty: Difficulty = .veteran
     @Published var aim = Point2(x: 0.5, y: 0.4)
     @Published var message = "PRESS RETURN TO DEFEND"
+    @Published var timeOfDay = 21.0
+    @Published var scenerySeed = 1307
+    var dayPeriod: String {
+        switch timeOfDay {
+        case 5..<8: return "DAWN"
+        case 8..<17: return "DAY"
+        case 17..<20: return "DUSK"
+        default: return "NIGHT"
+        }
+    }
+    var timeLabel: String { String(format:"%02d:%02d",Int(timeOfDay),Int(timeOfDay.truncatingRemainder(dividingBy:1)*60)) }
     let cityLocations: [Double] = [0.13,0.27,0.41,0.59,0.73,0.87]
     let batteries: [Double] = [0.07,0.50,0.93]
     let ground = 0.88
@@ -343,12 +356,18 @@ private final class BarrageGame: ObservableObject {
         supplyTruck=nil;bomber=nil;fallingBombs=[];bomberExplosions=[];screenShake=0
         nextBomberTime=12
         cities = Array(repeating: true, count: 6)
+        // Fresh games begin at random hours, then progress 2.75 hours per wave.
+        timeOfDay = Double.random(in:0..<24)
+        scenerySeed = Int.random(in:1...100_000)
         score = 0; wave = max(1,min(20,rules.startingWave)); selected = 1
         combo = 0; bestCombo = 0; totalIntercepts = 0; gameSeconds = 0
         running = true; paused = false; gameOver = false; waiting = false
         nextWave()
     }
     private func nextWave() {
+        if wave > max(1,min(20,rules.startingWave)) {
+            timeOfDay = (timeOfDay + 2.75).truncatingRemainder(dividingBy:24)
+        }
         hostiles = []; defenses = []; bursts = []; impacts = []; launches = []
         hitStreak = 0; battlePulse = 0; tripleBonus = nil; lastAlertTone = -100
         isFiringStream=false; repeatFireTime=0
@@ -721,7 +740,7 @@ private final class BarrageGame: ObservableObject {
             recovery:recovery,gameSeconds:gameSeconds,lastIntercept:lastIntercept,
             nuclearAvailable:nuclearAvailable,atomicShots:atomicShots,
             supplyTruck:supplyTruck,bomber:bomber,nextBomberTime:nextBomberTime,
-            fallingBombs:fallingBombs)
+            fallingBombs:fallingBombs,timeOfDay:timeOfDay,scenerySeed:scenerySeed)
         BattleStore.insert(battle)
         message="GAME SAVED — WAVE \(wave)"
         return true
@@ -736,6 +755,8 @@ private final class BarrageGame: ObservableObject {
         pattern=b.pattern;assault=b.pattern.rawValue
         lastWaveBatch=b.lastWaveBatch;recovery=b.recovery
         gameSeconds=b.gameSeconds;lastIntercept=b.lastIntercept
+        timeOfDay=b.timeOfDay ?? 21
+        scenerySeed=b.scenerySeed ?? 1307
         nuclearAvailable=b.nuclearAvailable ?? [true,true,true]
         atomicShots=b.atomicShots ?? []
         supplyTruck=b.supplyTruck
@@ -784,7 +805,7 @@ private struct BarrageWindow: View {
         VStack(spacing:0) {
             HStack(spacing:14) {
                 Text("VECTOR BARRAGE").font(.system(size:16,weight:.heavy,design:.monospaced)).tracking(2)
-                Text("v0.9.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
+                Text("v1.0.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
                 Spacer()
                 Picker("Display",selection:$game.mode) {
                     ForEach(VisualMode.allCases) { Text($0.rawValue).tag($0) }
@@ -824,7 +845,7 @@ private struct BarrageWindow: View {
                     }.onEnded { _ in
                         game.stopFiring()
                     })
-                    .overlay(KeyboardCapture(onKey:game.key, onControlPress:game.cycleBattery).allowsHitTesting(false))
+                    .overlay(KeyboardCapture(onKey:game.key, onTabPress:game.cycleBattery).allowsHitTesting(false))
                 }
                 BarrageTelemetry(game: game)
                     .frame(width: 205)
@@ -846,7 +867,7 @@ private struct BarrageWindow: View {
             HStack {
                 Text(game.message).foregroundStyle(.orange)
                 Spacer()
-                Text("DRAG TO FIRE STREAM   CTRL BATTERY   T TRUCK   N NUCLEAR   P PAUSE")
+                Text("DRAG FIRE STREAM   TAB BATTERY   T TRUCK   N NUCLEAR   P PAUSE")
                     .foregroundStyle(.white.opacity(0.52))
             }
             .font(.system(size:10,weight:.semibold,design:.monospaced))
@@ -1517,22 +1538,21 @@ private struct BarrageTelemetry: View {
 
 private struct KeyboardCapture: NSViewRepresentable {
     let onKey: (String) -> Void
-    let onControlPress: () -> Void
+    let onTabPress: () -> Void
     func makeNSView(context:Context) -> KeyView {
         let view=KeyView()
         view.onKey=onKey
-        view.onControlPress=onControlPress
+        view.onTabPress=onTabPress
         DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
         return view
     }
     func updateNSView(_ nsView:KeyView,context:Context) {
         nsView.onKey=onKey
-        nsView.onControlPress=onControlPress
+        nsView.onTabPress=onTabPress
     }
     final class KeyView: NSView {
         var onKey: ((String)->Void)?
-        var onControlPress: (() -> Void)?
-        private var controlHeld = false
+        var onTabPress: (() -> Void)?
         override var acceptsFirstResponder: Bool { true }
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -1541,14 +1561,19 @@ private struct KeyboardCapture: NSViewRepresentable {
                 self.window?.makeFirstResponder(self)
             }
         }
-        override func flagsChanged(with event:NSEvent) {
-            super.flagsChanged(with:event)
-            let down = event.modifierFlags.contains(.control)
-            if down && !controlHeld { onControlPress?() }
-            controlHeld = down
-        }
         override func keyDown(with event:NSEvent) {
+            if event.keyCode == 48 {
+                onTabPress?()
+                return
+            }
             if let text=event.charactersIgnoringModifiers { onKey?(text) }
+        }
+        override func performKeyEquivalent(with event:NSEvent) -> Bool {
+            if event.keyCode == 48 && !event.modifierFlags.contains(.command) {
+                onTabPress?()
+                return true
+            }
+            return super.performKeyEquivalent(with:event)
         }
     }
 }
