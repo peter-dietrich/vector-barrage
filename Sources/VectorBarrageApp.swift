@@ -179,6 +179,7 @@ private final class ArcadeAudio {
         let volume: Double
         switch event {
         case "launch": duration=0.17;freq=690;volume=0.22
+        case "empty": duration=0.14;freq=115;volume=0.24
         case "hit": duration=0.28;freq=390;volume=0.32
         case "chain": duration=0.46;freq=550;volume=0.43
         case "triple": duration=0.72;freq=850;volume=0.51
@@ -284,7 +285,29 @@ private final class BarrageGame: ObservableObject {
     private var gameSeconds = 0.0
     private var lastIntercept = -100.0
     private var lastTick: Date?
+    @Published var isFiringStream = false
+    private var repeatFireTime = 0.0
+    private var lastEmptySound = Date.distantPast
+    private let streamInterval = 0.19
     var alive: Int { cities.filter { $0 }.count }
+    var lowAmmoThreshold: Int { max(1,Int(ceil(Double(max(4,rules.batteryAmmo))*0.20))) }
+    func isLowAmmo(_ bank: Int) -> Bool {
+        ammo.indices.contains(bank) && ammo[bank] <= lowAmmoThreshold
+    }
+    // A city inherits the same 25% flight-path threshold as telemetry.
+    var threatenedCityIndices: Set<Int> {
+        var threatened = Set<Int>()
+        for missile in hostiles {
+            let distance = missile.origin.distance(missile.target)
+            guard distance > 0 && missile.point.distance(missile.target) / distance <= 0.25 else { continue }
+            if let index=cityLocations.indices.min(by: {
+                abs(cityLocations[$0]-missile.target.x) < abs(cityLocations[$1]-missile.target.x)
+            }), cities[index], abs(cityLocations[index]-missile.target.x) < 0.09 {
+                threatened.insert(index)
+            }
+        }
+        return threatened
+    }
     // A warning applies only to an active city target and the LAST 25% of
     // that missile's own trajectory, including split child missiles.
     var criticalThreatCount: Int {
@@ -302,6 +325,7 @@ private final class BarrageGame: ObservableObject {
     func start() {
         hostiles = []; defenses = []; bursts = []; launches = []
         hitStreak = 0; battlePulse = 0; tripleBonus = nil; lastAlertTone = -100
+        isFiringStream=false; repeatFireTime=0
         nuclearAvailable = [true,true,true];atomicShots=[];atomicBursts=[]
         supplyTruck=nil;bomber=nil;bomberExplosions=[];screenShake=0
         nextBomberTime=12
@@ -314,6 +338,7 @@ private final class BarrageGame: ObservableObject {
     private func nextWave() {
         hostiles = []; defenses = []; bursts = []; impacts = []; launches = []
         hitStreak = 0; battlePulse = 0; tripleBonus = nil; lastAlertTone = -100
+        isFiringStream=false; repeatFireTime=0
         atomicShots=[];atomicBursts=[];supplyTruck=nil;bomber=nil;bomberExplosions=[]
         screenShake=0;nextBomberTime=gameSeconds + Double.random(in:13...18)
         ammo = Array(repeating: max(4,min(30,rules.batteryAmmo)),count:3)
@@ -352,8 +377,28 @@ private final class BarrageGame: ObservableObject {
         message="NUCLEAR INTERCEPTOR — \(bank+1) OF 3"
         audio.play("nuke",enabled:rules.soundEnabled)
     }
+    func startFiring(at location: Point2) {
+        aim=location
+        guard running && !paused && !waiting else { return }
+        if !isFiringStream {
+            isFiringStream=true
+            repeatFireTime=0
+            fire(location)  // Zero-delay first shot on mouse down.
+        }
+    }
+    func trackFiring(at location: Point2) { aim=location }
+    func stopFiring() { isFiringStream=false;repeatFireTime=0 }
     func fire(_ location: Point2) {
-        guard running && !paused && !waiting && ammo[selected] > 0 else { return }
+        guard running && !paused && !waiting else { return }
+        guard ammo[selected] > 0 else {
+            // Throttle the dry-fire click during held mouse input.
+            if Date().timeIntervalSince(lastEmptySound) >= 0.4 {
+                audio.play("empty",enabled:rules.soundEnabled)
+                lastEmptySound=Date()
+            }
+            message="BATTERY \(selected+1) EMPTY — SELECT ANOTHER OR PRESS T"
+            return
+        }
         let target = Point2(x: max(0.02,min(0.98,location.x)), y: max(0.03,min(0.81,location.y)))
         let launch = Point2(x: batteries[selected],y:ground)
         ammo[selected] -= 1
@@ -366,6 +411,7 @@ private final class BarrageGame: ObservableObject {
     func togglePause() {
         guard running && !waiting else { return }
         paused.toggle()
+        if paused { stopFiring() }
         message = paused ? "PAUSED" : "DEFEND THE CITIES"
     }
     func key(_ input: String) {
@@ -391,6 +437,14 @@ private final class BarrageGame: ObservableObject {
         }
         guard running && !paused && !waiting else { return }
         gameSeconds += dt
+        if isFiringStream {
+            repeatFireTime += dt
+            while repeatFireTime >= streamInterval {
+                repeatFireTime -= streamInterval
+                if ammo[selected] > 0 { fire(aim) }
+                else { fire(aim); stopFiring(); break }
+            }
+        }
         screenShake = max(0,screenShake-dt*1.25)
         for i in bomberExplosions.indices { bomberExplosions[i].age += dt }
         bomberExplosions.removeAll { $0.age > 1.4 }
@@ -629,7 +683,7 @@ private final class BarrageGame: ObservableObject {
         bomberExplosions=[];atomicBursts=[];screenShake=0
         impacts=[];launches=[];nuclear=[];tripleBonus=nil;lastAlertTone = -100
         battlePulse=0;hitStreak=0
-        lastTick=nil;paused=true
+        lastTick=nil;paused=true;stopFiring()
         message="RESTORED — PRESS P TO CONTINUE"
     }
     private func spawnEnemy() {
@@ -643,9 +697,14 @@ private final class BarrageGame: ObservableObject {
         case .mirv: originX = Double.random(in:0.12...0.88)
         }
         let origin = Point2(x:originX,y:0.02)
+        // Higher waves increase BOTH speed and variability per spawned missile;
+        // the upper bound limits impossible late-wave reaction times.
+        let variance=min(0.43,0.10+Double(max(0,wave-1))*0.025)
+        let progression=min(1.90,1.0+Double(max(0,wave-1))*0.045)
+        let randomSpeed=Double.random(in:(1.0-variance)...(1.0+variance))
         hostiles.append(Hostile(origin:origin,point:origin,
             target:Point2(x:cityLocations[i],y:ground),
-            speed:min(0.19,0.084+Double(wave-1)*0.006)*difficulty.multiplier*Double(rules.missileSpeed)/100*Double.random(in:0.88...1.10),
+            speed:min(0.32,0.084*progression*difficulty.multiplier*Double(rules.missileSpeed)/100*randomSpeed),
             splits:wave >= 3 && (pattern == .mirv ? spawned.isMultiple(of:3) :
                 Int.random(in:0..<100) < min(28,6+wave*2))))
     }
@@ -663,7 +722,7 @@ private struct BarrageWindow: View {
         VStack(spacing:0) {
             HStack(spacing:14) {
                 Text("VECTOR BARRAGE").font(.system(size:16,weight:.heavy,design:.monospaced)).tracking(2)
-                Text("v0.7.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
+                Text("v0.8.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
                 Spacer()
                 Picker("Display",selection:$game.mode) {
                     ForEach(VisualMode.allCases) { Text($0.rawValue).tag($0) }
@@ -695,11 +754,13 @@ private struct BarrageWindow: View {
                     .background(Color(red:0.015,green:0.024,blue:0.052))
                     .contentShape(Rectangle())
                     .gesture(DragGesture(minimumDistance:0).onChanged { value in
-                        game.aim = Point2(x:Double(value.location.x/max(1,geometry.size.width)),
-                            y:Double(value.location.y/max(1,geometry.size.height)))
-                    }.onEnded { value in
-                        game.fire(Point2(x:Double(value.location.x/max(1,geometry.size.width)),
-                            y:Double(value.location.y/max(1,geometry.size.height))))
+                        let location=Point2(
+                            x:max(0,min(1,Double(value.location.x/max(1,geometry.size.width)))),
+                            y:max(0,min(1,Double(value.location.y/max(1,geometry.size.height)))))
+                        game.trackFiring(at:location)
+                        game.startFiring(at:location)
+                    }.onEnded { _ in
+                        game.stopFiring()
                     })
                     .overlay(KeyboardCapture(onKey:game.key, onControlPress:game.cycleBattery).allowsHitTesting(false))
                 }
@@ -723,7 +784,7 @@ private struct BarrageWindow: View {
             HStack {
                 Text(game.message).foregroundStyle(.orange)
                 Spacer()
-                Text("CLICK FIRE   CTRL BATTERY   T TRUCK   N NUCLEAR   P PAUSE   RETURN NEXT")
+                Text("DRAG TO FIRE STREAM   CTRL BATTERY   T TRUCK   N NUCLEAR   P PAUSE")
                     .foregroundStyle(.white.opacity(0.52))
             }
             .font(.system(size:10,weight:.semibold,design:.monospaced))
@@ -864,6 +925,7 @@ private struct BarrageWindow: View {
                  cyan.opacity(0.31),1.0)
         }
         line(CGPoint(x:0,y:ground),CGPoint(x:w,y:ground),cyan,2)
+        let threatened=game.threatenedCityIndices
         for i in 0..<6 {
             let x=w*game.cityLocations[i]
             // Uniform 10% increase in city footprint and height around ground.
@@ -872,8 +934,16 @@ private struct BarrageWindow: View {
             cityCtx.translateBy(x:x,y:ground)
             cityCtx.scaleBy(x:cityScale,y:cityScale)
             cityCtx.translateBy(x:-x,y:-ground)
-            let ink:Color=modern ? cyan : .green
+            let cityInDanger=threatened.contains(i)
+            let ink:Color=cityInDanger ? (game.proximityPulseOn ? .red : .orange) :
+                                (modern ? cyan : .green)
             if game.cities[i] {
+                if cityInDanger {
+                    let warning=CGRect(x:x-31,y:ground-66,width:62,height:66)
+                    cityCtx.stroke(Path(roundedRect:warning,cornerRadius:4),
+                        with:.color(.red.opacity(game.proximityPulseOn ? 0.84 : 0.42)),
+                        lineWidth:game.proximityPulseOn ? 2.4 : 1.2)
+                }
                 let pedestal=CGRect(x:x-24,y:ground-6,width:48,height:6)
                 cityCtx.fill(Path(pedestal),with:.color(Color(red:0.06,green:0.23,blue:0.30)))
                 cityCtx.stroke(Path(pedestal),with:.color(ink.opacity(0.72)),lineWidth:1)
@@ -910,7 +980,9 @@ private struct BarrageWindow: View {
         for i in 0..<3 {
             let x=w*game.batteries[i]
             let armed=i == game.selected
-            let baseInk:Color=armed ? .white : cyan.opacity(0.78)
+            let lowAmmo=game.isLowAmmo(i)
+            let baseInk:Color=lowAmmo ? (game.ammo[i] == 0 ? .red : .orange) :
+                                  (armed ? .white : cyan.opacity(0.78))
             let bunker=CGRect(x:x-27,y:ground-14,width:54,height:14)
             ctx.fill(Path(bunker),with:.color(Color(red:0.04,green:0.14,blue:0.19)))
             ctx.stroke(Path(bunker),with:.color(baseInk),lineWidth:1.4)
@@ -929,12 +1001,18 @@ private struct BarrageWindow: View {
             line(CGPoint(x:x-9,y:ground-26),CGPoint(x:x+9,y:ground-26),baseInk.opacity(0.7),1)
             for p in [-18.0,18.0] {
                 ctx.fill(Path(ellipseIn:CGRect(x:x+p-2,y:ground-9,width:4,height:4)),
-                         with:.color(armed ? .orange : cyan.opacity(0.4)))
+                         with:.color(lowAmmo ? .red : (armed ? .orange : cyan.opacity(0.4))))
             }
             // Selected battery is obvious without a large distracting glow.
             if armed {
                 ctx.stroke(Path(ellipseIn:CGRect(x:x-32,y:ground-54,width:64,height:48)),
-                           with:.color(cyan.opacity(0.32)),lineWidth:1)
+                           with:.color(lowAmmo ? .orange.opacity(0.85) : cyan.opacity(0.32)),lineWidth:1.8)
+            }
+            if lowAmmo {
+                ctx.draw(Text(game.ammo[i] == 0 ? "EMPTY" : "LOW AMMO")
+                    .font(.system(size:10,weight:.heavy,design:.monospaced))
+                    .foregroundColor(game.ammo[i] == 0 ? .red : .orange),
+                    at:CGPoint(x:x,y:ground-65))
             }
         }
         // City destruction: ignition flash, expanding pressure ring,
@@ -1263,14 +1341,23 @@ private struct BarrageTelemetry: View {
                         Text(["LEFT", "CENTER", "RIGHT"][i])
                             .font(.system(size:13,weight:game.selected == i ? .bold : .medium,
                                           design:.monospaced))
-                            .foregroundStyle(game.selected == i ? amber : muted)
+                            .foregroundStyle(game.isLowAmmo(i) ? Color.orange :
+                                (game.selected == i ? amber : muted))
                         Spacer(minLength: 1)
                         Text(String(format:"%02d",game.ammo[i]))
                             .font(.system(size:18,weight:.bold,design:.monospaced))
                             .monospacedDigit()
-                            .foregroundStyle(game.selected == i ? ice : .white)
+                            .foregroundStyle(game.isLowAmmo(i) ?
+                                (game.ammo[i] == 0 ? Color.red : Color.orange) :
+                                (game.selected == i ? ice : .white))
                     }
                     .padding(.top,7)
+                    if game.isLowAmmo(i) {
+                        Text(game.ammo[i] == 0 ? "EMPTY CHAMBER" :
+                            "LOW AMMO  ≤20%")
+                            .font(.system(size:9,weight:.bold,design:.monospaced))
+                            .foregroundStyle(game.ammo[i] == 0 ? Color.red : Color.orange)
+                    }
                 }
                 if game.criticalThreatCount > 0 {
                     VStack(alignment:.trailing,spacing:3) {
