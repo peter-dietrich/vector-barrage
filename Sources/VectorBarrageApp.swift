@@ -1293,7 +1293,8 @@ private struct BarrageWindow: View {
                             Text("VECTOR BARRAGE")
                                 .font(.system(size:19,weight:.black,design:.monospaced))
                                 .foregroundStyle(.white)
-                            Text("v1.2.7")
+                            Text("v2026.11.13a")
+                                .help("Source build identifier: v2026.11.13a")
                                 .font(.system(size:10,weight:.medium,design:.monospaced))
                                 .foregroundStyle(.gray)
                         }
@@ -1341,7 +1342,16 @@ private struct BarrageWindow: View {
                                     .strokeBorder(Color.white.opacity(0.30),lineWidth:1))
                         }
                     }
-                    Spacer()
+                    Spacer(minLength:8)
+                    HStack(spacing:7) {
+                        Button(game.paused ? "Resume Play" : "Pause") { game.togglePause() }
+                            .help("P: pause or resume")
+                        Button("Supply Truck") { game.redistributeAmmo() }
+                            .help("T: redistribute ammunition")
+                        Button("Nuclear") { game.launchNuclear() }
+                            .help("N: fire selected battery's nuclear interceptor")
+                    }
+                    Spacer(minLength:8)
                     Text("GRAPHICS")
                         .font(.system(size:10,weight:.bold,design:.monospaced))
                         .foregroundStyle(.gray)
@@ -1384,34 +1394,6 @@ private struct BarrageWindow: View {
                 BarrageTelemetry(game: game)
                     .frame(width: 205)
             }
-            HStack(spacing:12) {
-                Text("SCORE \(game.score)")
-                    .monospacedDigit()
-                Text("HIGH \(game.highScore)  \(game.highScoreInitials)")
-                    .monospacedDigit()
-                    .foregroundStyle(.cyan)
-                    .monospacedDigit()
-                Text("WAVE \(game.wave)")
-                    .monospacedDigit()
-                Text("CITIES \(game.alive)/6")
-                    .monospacedDigit()
-                Spacer(minLength:8)
-                Button(game.paused ? "Resume Play" : "Pause") { game.togglePause() }
-                    .help("P: pause or resume play")
-                Button("Supply Truck") { game.redistributeAmmo() }
-                    .help("T: redistribute ammunition between batteries")
-                Button("Nuclear") { game.launchNuclear() }
-                    .help("N: launch the selected battery nuclear interceptor")
-                Divider().frame(height:20)
-                ForEach(0..<3,id:\.self) { i in
-                    Button("\(i+1): \(game.ammo[i])") { game.select(i) }
-                        .buttonStyle(.bordered)
-                        .tint(game.selected == i ? .cyan : .gray)
-                }
-            }
-            .font(.system(size:11,weight:.semibold,design:.monospaced))
-            .padding(.horizontal,16).frame(height:48)
-            .background(Color(white:0.10))
             HStack(spacing:12) {
                 Text("DRAG TO FIRE  •  TAB CHANGE BATTERY  •  T TRUCK  •  N NUCLEAR  •  P PAUSE  •  RETURN NEXT WAVE")
                     .foregroundStyle(.white.opacity(0.75))
