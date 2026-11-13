@@ -4,7 +4,7 @@ Native macOS missile-defense arcade game and fifth built-in Fun City cabinet.
 
 ## Current build
 
-**v0.7.0 — logistics, nuclear interception and stealth bombers**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
+**v0.8.0 — continuous fire, live low-ammo and city warnings, varied missile speed**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
 
 - Defend six cities using three selectable interceptor batteries.
 - Enemy missiles, expanding interception zones, chain-reaction scoring and splitting missiles in later waves.
@@ -80,3 +80,11 @@ An original game inspired by the classic missile-defense arcade genre. No Atari/
 - Full flash and shake are reduced in the custom game's reduced-flash option.
 
 **New controls**: T redistribute ammo; N launch selected battery's limited nuclear interceptor. Existing Control battery cycling, mouse fire, P pause, Return next wave remain.
+
+## v0.8.0 improvements
+
+- **Hold and drag the mouse** over the battlefield to launch a continuous stream of regular interceptors from the selected battery, approximately every 0.19 seconds. First shot fires immediately; releasing stops the stream. Every shot consumes one round.
+- Battery ammunition counters and battery vector art shift to amber/orange when their supply reaches **20% or less** of configured per-battery ammunition capacity. Empty batteries turn red and produce a throttled dry-fire click when firing is attempted.
+- Cities being targeted by an incoming missile in the final 25% of its flight path switch to orange/red and show an animated threat outline, synchronized with the proximity warning on telemetry. Alerts clear when the missile is destroyed.
+- Each wave increases the potential speed and random speed spread of incoming missiles, capped to maintain playable response times.
+- Previously created save slots remain readable; settings and truck redistribution continue to influence ammo warnings.
