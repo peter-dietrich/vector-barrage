@@ -4,7 +4,7 @@ Native macOS missile-defense arcade game and fifth built-in Fun City cabinet.
 
 ## Current build
 
-**v1.2.0 — complete Custom Game configuration**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
+**v1.2.1 — Vector Drift-inspired perimeter and named Custom Game presets**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
 
 - Defend six cities using three selectable interceptor batteries.
 - Enemy missiles, expanding interception zones, chain-reaction scoring and splitting missiles in later waves.
@@ -134,3 +134,11 @@ The **Custom Game** window is now scrollable and organized by system, with **Res
 - **Effects:** sounds on/off and reduced flash/shake.
 
 The default values preserve the established game balance (15 missiles per battery and +2 each wave, first meteor wave 3, first bomber wave 2, 20% ammo warning, 25% proximity warning). Fixed battlefield structure (three batteries, six cities) is not changeable because the positions and UI are designed around those counts. Existing saves remain readable using defaults for newly introduced controls.
+
+## v1.2.1 — perimeter controls and saved Custom Game setups
+
+- The game's perimeter now aligns with **Vector Drift**: a two-row header with title, version and main actions above graphical difficulty/graphics selectors, a compact lower tactical strip, and streamlined keyboard help at the bottom.
+- The new **Custom Game** preset library saves independently of an in-progress battle. Enter a name and click **Save Setup**; the setup includes the complete game rules, difficulty, and visual mode. Saving under an existing name updates that preset.
+- Use **Load Saved Setup** to populate the editor and **Apply & Start** to play with those settings. Use **Delete Setup** to remove a named preset. Presets survive app restarts through local UserDefaults storage.
+- Saved setups do not replace or overwrite Saved Games, which continue to preserve battle progress separately.
+- The original keyboard controls and battery ammunition readouts remain available in the lower tactical strip.
