@@ -31,6 +31,23 @@ private struct Hostile: Identifiable, Codable {
     var speed: Double
     var splits: Bool
     var hasSplit = false
+    // Optional for compatibility with pre-meteor saved battles.
+    var meteorFragment: Bool? = nil
+}
+private struct Meteor: Identifiable, Codable {
+    var id = UUID()
+    var point: Point2
+    var target: Point2
+    var speed: Double
+    var health = 3
+    // Each blast may damage this rock only once, even over many frames.
+    var hitBursts: [UUID] = []
+    var rotation = 0.0
+}
+private struct MeteorBreakup: Identifiable {
+    var id = UUID()
+    var point: Point2
+    var age = 0.0
 }
 private struct Defense: Identifiable, Codable {
     var id = UUID()
@@ -158,6 +175,10 @@ private struct SavedBattle: Codable, Identifiable {
     var fallingBombs: [FallingBomb]? = nil
     var timeOfDay: Double? = nil
     var scenerySeed: Int? = nil
+    var meteors: [Meteor]? = nil
+    var meteorQuota: Int? = nil
+    var meteorSpawned: Int? = nil
+    var nextMeteorTime: Double? = nil
 }
 @MainActor
 private enum BattleStore {
@@ -202,6 +223,8 @@ private final class ArcadeAudio {
         case "nuke": duration=0.62;freq=110;volume=0.46
         case "bomber": duration=0.34;freq=240;volume=0.26
         case "airburst": duration=1.05;freq=95;volume=0.52
+        case "meteor": duration=0.52;freq=115;volume=0.43
+        case "crack": duration=0.29;freq=290;volume=0.37
         case "city": duration=1.5;freq=75;volume=0.70
         case "wave": duration=0.65;freq=620;volume=0.30
         default: duration=0.12;freq=250;volume=0.20
@@ -250,6 +273,12 @@ private enum VisualMode: String, CaseIterable, Identifiable, Codable {
 @MainActor
 private final class BarrageGame: ObservableObject {
     @Published var hostiles: [Hostile] = []
+    @Published var meteors: [Meteor] = []
+    @Published var meteorBreakups: [MeteorBreakup] = []
+    @Published var meteorFlash = 0.0
+    private var meteorQuota = 0
+    private var meteorSpawned = 0
+    private var nextMeteorTime = 0.0
     @Published var defenses: [Defense] = []
     @Published var bursts: [Burst] = []
     @Published var impacts: [ImpactFX] = []
@@ -356,6 +385,8 @@ private final class BarrageGame: ObservableObject {
         supplyTruck=nil;bomber=nil;fallingBombs=[];bomberExplosions=[];screenShake=0
         nextBomberTime=12
         cities = Array(repeating: true, count: 6)
+        meteors=[];meteorBreakups=[];meteorFlash=0
+        meteorQuota=0;meteorSpawned=0
         // Fresh games begin at random hours, then progress 2.75 hours per wave.
         timeOfDay = Double.random(in:0..<24)
         scenerySeed = Int.random(in:1...100_000)
@@ -369,6 +400,15 @@ private final class BarrageGame: ObservableObject {
             timeOfDay = (timeOfDay + 2.75).truncatingRemainder(dividingBy:24)
         }
         hostiles = []; defenses = []; bursts = []; impacts = []; launches = []
+        meteors=[];meteorBreakups=[];meteorFlash=0
+        // One meteor each for waves 3–5, then a rising chance of extras.
+        meteorQuota = wave < 3 ? 0 : wave <= 5 ? 1 :
+            1 + (Int.random(in:0..<100) < min(75,12+(wave-6)*6) ? 1 : 0)
+        if wave >= 12 && Int.random(in:0..<100) < min(48,(wave-11)*5) {
+            meteorQuota += 1
+        }
+        meteorSpawned=0
+        nextMeteorTime=gameSeconds+4.0
         hitStreak = 0; battlePulse = 0; tripleBonus = nil; lastAlertTone = -100
         isFiringStream=false; repeatFireTime=0
         atomicShots=[];atomicBursts=[];supplyTruck=nil;bomber=nil;fallingBombs=[];bomberExplosions=[]
@@ -469,6 +509,14 @@ private final class BarrageGame: ObservableObject {
         }
         guard running && !paused && !waiting else { return }
         gameSeconds += dt
+        meteorFlash=max(0,meteorFlash-dt*2.6)
+        for i in meteorBreakups.indices { meteorBreakups[i].age += dt }
+        meteorBreakups.removeAll { $0.age > 1.7 }
+        if meteorSpawned < meteorQuota && gameSeconds >= nextMeteorTime {
+            spawnMeteor()
+            meteorSpawned += 1
+            nextMeteorTime=gameSeconds+Double.random(in:7.5...11.5)
+        }
         if isFiringStream {
             repeatFireTime += dt
             while repeatFireTime >= streamInterval {
@@ -643,6 +691,47 @@ private final class BarrageGame: ObservableObject {
         defenses.removeAll { $0.point.distance($0.target) < 0.00001 }
         for i in bursts.indices { bursts[i].age += dt }
         bursts.removeAll { $0.age >= 1.05 }
+        // Meteor armor: three DISTINCT interceptor blasts must connect.
+        // A single expanding ring cannot consume all three hit points.
+        var activeMeteors: [Meteor] = []
+        for var meteor in meteors {
+            meteor.point=meteor.point.moved(to:meteor.target,amount:meteor.speed*dt)
+            meteor.rotation += dt*0.65
+            let touching=bursts.filter { !$0.hostile && $0.radius > 0 &&
+                meteor.point.distance($0.point) <= $0.radius+0.021 }
+            let newHits=touching.filter { !meteor.hitBursts.contains($0.id) }
+            if !newHits.isEmpty {
+                // Cap each frame at remaining hit points, counting unique blasts.
+                for blast in newHits.prefix(meteor.health) {
+                    meteor.hitBursts.append(blast.id)
+                    meteor.health -= 1
+                    score += 70
+                    impacts.append(ImpactFX(point:meteor.point,danger:false,points:70))
+                }
+                audio.play(meteor.health == 0 ? "meteor" : "crack",enabled:rules.soundEnabled)
+                if meteor.health > 0 {
+                    message="METEOR ARMOR  \(meteor.health)/3"
+                }
+            }
+            if meteor.health <= 0 {
+                breakMeteor(meteor)
+            } else if meteor.point.y >= ground {
+                // Intact meteor hitting the ground takes one surviving city.
+                if let city=cityLocations.indices.min(by: {
+                    abs(cityLocations[$0]-meteor.target.x) < abs(cityLocations[$1]-meteor.target.x)
+                }), cities[city] {
+                    cities[city]=false
+                    nuclear.append(NuclearFX(point:Point2(x:cityLocations[city],y:ground)))
+                    audio.play("city",enabled:rules.soundEnabled)
+                }
+                screenShake=max(screenShake,0.8)
+                meteorFlash=max(meteorFlash,0.50)
+                message="METEOR IMPACT"
+            } else {
+                activeMeteors.append(meteor)
+            }
+        }
+        meteors=activeMeteors
         if let aircraft=bomber, bursts.contains(where: {
             !$0.hostile && $0.radius > 0 && $0.point.distance(aircraft.point) < $0.radius+0.045
         }) {
@@ -722,7 +811,7 @@ private final class BarrageGame: ObservableObject {
         if alive == 0 {
             running = false; gameOver = true
             message = "GAME OVER — SCORE \(score)"
-        } else if spawned >= quota && hostiles.isEmpty && fallingBombs.isEmpty && defenses.isEmpty && bomber == nil && atomicShots.isEmpty {
+        } else if spawned >= quota && meteorSpawned >= meteorQuota && meteors.isEmpty && hostiles.isEmpty && fallingBombs.isEmpty && defenses.isEmpty && bomber == nil && atomicShots.isEmpty {
             waiting = true
             let bonus = alive*100 + ammo.reduce(0,+)*5 + bestCombo*20
             score += bonus
@@ -740,7 +829,9 @@ private final class BarrageGame: ObservableObject {
             recovery:recovery,gameSeconds:gameSeconds,lastIntercept:lastIntercept,
             nuclearAvailable:nuclearAvailable,atomicShots:atomicShots,
             supplyTruck:supplyTruck,bomber:bomber,nextBomberTime:nextBomberTime,
-            fallingBombs:fallingBombs,timeOfDay:timeOfDay,scenerySeed:scenerySeed)
+            fallingBombs:fallingBombs,timeOfDay:timeOfDay,scenerySeed:scenerySeed,
+            meteors:meteors,meteorQuota:meteorQuota,meteorSpawned:meteorSpawned,
+            nextMeteorTime:nextMeteorTime)
         BattleStore.insert(battle)
         message="GAME SAVED — WAVE \(wave)"
         return true
@@ -757,6 +848,11 @@ private final class BarrageGame: ObservableObject {
         gameSeconds=b.gameSeconds;lastIntercept=b.lastIntercept
         timeOfDay=b.timeOfDay ?? 21
         scenerySeed=b.scenerySeed ?? 1307
+        meteors=b.meteors ?? []
+        meteorQuota=b.meteorQuota ?? 0
+        meteorSpawned=b.meteorSpawned ?? meteorQuota
+        nextMeteorTime=b.nextMeteorTime ?? (gameSeconds+7)
+        meteorBreakups=[];meteorFlash=0
         nuclearAvailable=b.nuclearAvailable ?? [true,true,true]
         atomicShots=b.atomicShots ?? []
         supplyTruck=b.supplyTruck
@@ -768,6 +864,32 @@ private final class BarrageGame: ObservableObject {
         battlePulse=0;hitStreak=0
         lastTick=nil;paused=true;stopFiring()
         message="RESTORED — PRESS P TO CONTINUE"
+    }
+    private func spawnMeteor() {
+        let city=cityLocations.indices.filter { cities[$0] }.randomElement()
+        guard let city else { return }
+        let start=Point2(x:Double.random(in:0.16...0.84),y:-0.04)
+        let speed=min(0.071,0.040+Double(max(0,wave-3))*0.0012)
+        meteors.append(Meteor(point:start,target:Point2(x:cityLocations[city],y:ground),
+                              speed:speed))
+        message="METEOR INBOUND — THREE HITS REQUIRED"
+    }
+    private func breakMeteor(_ meteor: Meteor) {
+        meteorBreakups.append(MeteorBreakup(point:meteor.point))
+        screenShake=max(screenShake,1.0)
+        meteorFlash=rules.reducedFlash ? 0.17 : 0.87
+        battlePulse=max(battlePulse,0.65)
+        score += 200
+        message="METEOR SHATTERED  +200 — FRAGMENTS INBOUND"
+        audio.play("airburst",enabled:rules.soundEnabled)
+        // Four distinct, interceptable fragments diverge toward surviving cities.
+        let offsets=[-0.16,-0.055,0.065,0.17]
+        for offset in offsets {
+            let aim=Point2(x:max(0.04,min(0.96,meteor.target.x+offset)),y:ground)
+            hostiles.append(Hostile(origin:meteor.point,point:meteor.point,
+                target:aim,speed:min(0.19,meteor.speed*2.4),
+                splits:false,hasSplit:false,meteorFragment:true))
+        }
     }
     private func spawnEnemy() {
         let targets = cityLocations.indices.filter { cities[$0] }
@@ -805,7 +927,7 @@ private struct BarrageWindow: View {
         VStack(spacing:0) {
             HStack(spacing:14) {
                 Text("VECTOR BARRAGE").font(.system(size:16,weight:.heavy,design:.monospaced)).tracking(2)
-                Text("v1.0.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
+                Text("v1.1.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
                 Spacer()
                 Picker("Display",selection:$game.mode) {
                     ForEach(VisualMode.allCases) { Text($0.rawValue).tag($0) }
