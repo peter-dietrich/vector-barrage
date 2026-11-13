@@ -1,19 +1,56 @@
 # Vector Barrage
 
-Original native macOS missile-defense arcade game for the Fun City launcher.
+Native macOS missile-defense arcade game and fifth built-in Fun City cabinet.
 
-## Development
+## Current build
 
-Version 0.1.0 prototype is being prepared with SwiftUI and an Xcode project, following the original Vector Drift and Vector Siege development approach.
+**v0.1.0 — first playable prototype**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
 
-Gameplay: defend six cities with three missile batteries; click to fire interceptors and create expanding blast zones. Planned modes: Classic and Modern; difficulties Cadet, Veteran and Ace; progressively harder waves.
+- Defend six cities using three selectable interceptor batteries.
+- Enemy missiles, expanding interception zones, chain-reaction scoring and splitting missiles in later waves.
+- Classic / Modern graphics and Cadet / Veteran / Ace difficulty.
+- Progressive waves, ammo replenishment, score, city survival and wave-clear bonuses.
+- Bundle identifier: `io.vectorbarrage.game`.
 
-Controls: mouse click to fire; 1/2/3 select batteries; Return starts; P pauses; R restarts.
+## Run on your Mac
 
-Bundle identifier: `io.vectorbarrage.game`. Expected macOS bundle: `VectorBarrage.app`.
+```bash
+mkdir -p ~/Documents/GitHub
+cd ~/Documents/GitHub
+git clone https://github.com/peter-dietrich/vector-barrage.git
+cd vector-barrage
+git switch main
+git pull --ff-only origin main
+open VectorBarrage.xcodeproj
+```
 
-This game is inspired by the missile-defense arcade genre and does not reproduce Atari artwork, audio, trademarks, or cabinet graphics.
+In Xcode select **VectorBarrage**, **My Mac**, and press **Command-R**.
 
-## Status
+Or compile from Terminal:
 
-This repository is the canonical source location. The Xcode v0.1.0 prototype is available as a local project package, but has not yet been committed to this repository or compiled on macOS. The Fun City launcher integration is being prepared separately.
+```bash
+xcodebuild -project VectorBarrage.xcodeproj -scheme VectorBarrage -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+```
+
+## Controls
+
+| Control | Action |
+| --- | --- |
+| Return | Start / advance to the next wave / restart after game over |
+| Mouse click | Fire an interceptor at the clicked location |
+| 1 / 2 / 3 (or A / S / D) | Select left / center / right battery |
+| Space | Fire at the last cursor location |
+| P | Pause / resume |
+| R | Start a new game |
+
+If keyboard input does not register, click inside the game window to focus it.
+
+## Fun City integration
+
+Fun City includes a built-in **Vector Barrage** cabinet after the launcher update merged as PR #8. The launcher can open the game once macOS recognizes the `io.vectorbarrage.game` bundle. For local Xcode builds, select **LOCATE GAME** and point it to the built `VectorBarrage.app` (commonly in Xcode DerivedData `Build/Products/Debug`).
+
+A downloadable signed game is not published yet. Fun City's **DOWNLOAD GAME** action requires a future GitHub Release asset named `VectorBarrage-macOS.zip` with its integrity digest. The current prototype has not been compiled or tested on a Mac by this assistant.
+
+## Intellectual property
+
+An original game inspired by the classic missile-defense arcade genre. No Atari/Missile Command imagery or audio was copied.
