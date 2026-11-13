@@ -381,9 +381,11 @@ private final class BarrageGame: ObservableObject {
     @Published var highScore = UserDefaults.standard.integer(forKey:"VectorBarrage.highScore.v1")
     @Published var highScoreInitials = UserDefaults.standard.string(forKey:"VectorBarrage.highScoreInitials.v1") ?? "---"
     private(set) var recordToBeat = UserDefaults.standard.integer(forKey:"VectorBarrage.highScore.v1")
+    var hasUnclaimedHighScore: Bool { highScore > 0 && (highScoreInitials == "---" || highScoreInitials.isEmpty) }
     func registerHighScoreInitials(_ raw: String) {
         let initials=String(raw.uppercased().filter { $0.isLetter }.prefix(3))
-        guard !initials.isEmpty && gameOver && score >= highScore && score > recordToBeat else { return }
+        let newRunRecord = gameOver && score >= highScore && score > recordToBeat
+        guard !initials.isEmpty && (hasUnclaimedHighScore || newRunRecord) else { return }
         highScoreInitials=initials
         UserDefaults.standard.set(initials,forKey:"VectorBarrage.highScoreInitials.v1")
         recordToBeat=highScore
@@ -1291,7 +1293,7 @@ private struct BarrageWindow: View {
                             Text("VECTOR BARRAGE")
                                 .font(.system(size:19,weight:.black,design:.monospaced))
                                 .foregroundStyle(.white)
-                            Text("v1.2.4")
+                            Text("v1.2.5")
                                 .font(.system(size:10,weight:.medium,design:.monospaced))
                                 .foregroundStyle(.gray)
                         }
@@ -1309,6 +1311,12 @@ private struct BarrageWindow: View {
                         else { saveNotice="Start a battle before saving." }
                     }
                     Button("Resume") { savedBattles=BattleStore.list();showSaved=true }
+                    if game.hasUnclaimedHighScore {
+                        Button("Claim High Score") {
+                            initialsEntry=""
+                            showInitialsEntry=true
+                        }.help("Enter initials for an existing high score")
+                    }
                     Toggle("Sound",isOn:$game.rules.soundEnabled)
                         .toggleStyle(.checkbox)
                     Button("New Game") { game.start() }
@@ -1418,6 +1426,13 @@ private struct BarrageWindow: View {
             .background(Color(white:0.075))
         }
         .onReceive(clock) { game.tick($0) }
+        .onAppear {
+            // Legacy scores were saved before initials existed.
+            if game.hasUnclaimedHighScore {
+                initialsEntry=""
+                DispatchQueue.main.async { showInitialsEntry=true }
+            }
+        }
         .onChange(of:game.gameOver) { ended in
             if ended && game.score > game.recordToBeat && game.score > 0 {
                 initialsEntry=""
@@ -1429,9 +1444,11 @@ private struct BarrageWindow: View {
                 Text("NEW HIGH SCORE")
                     .font(.system(size:23,weight:.black,design:.monospaced))
                     .foregroundStyle(.cyan)
-                Text(String(format:"%06d",game.score))
+                Text(String(format:"%06d",game.hasUnclaimedHighScore && !game.gameOver ? game.highScore : game.score))
                     .font(.system(size:36,weight:.heavy,design:.monospaced))
-                Text("Enter your initials (up to 3 letters)")
+                Text(game.hasUnclaimedHighScore && !game.gameOver ?
+                    "Claim your existing record — enter up to three initials" :
+                    "Enter your initials (up to 3 letters)")
                     .foregroundStyle(.secondary)
                 TextField("ABC",text:$initialsEntry)
                     .textFieldStyle(.roundedBorder)
