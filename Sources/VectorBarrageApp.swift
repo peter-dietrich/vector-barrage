@@ -132,7 +132,7 @@ private struct NuclearFX: Identifiable, Codable {
 }
 private struct GameRules: Codable {
     var startingWave = 1
-    var batteryAmmo = 12
+    var batteryAmmo = 15
     var waveSize = 100
     var missileSpeed = 100
     var soundEnabled = true
@@ -306,7 +306,7 @@ private final class BarrageGame: ObservableObject {
     @Published var totalIntercepts = 0
     @Published var assault = "WIDE FRONT"
     @Published var cities = Array(repeating: true, count: 6)
-    @Published var ammo = [12,12,12]
+    @Published var ammo = [15,15,15]
     @Published var selected = 1
     @Published var score = 0
     @Published var wave = 1
@@ -346,7 +346,10 @@ private final class BarrageGame: ObservableObject {
     private var lastEmptySound = Date.distantPast
     private let streamInterval = 0.19
     var alive: Int { cities.filter { $0 }.count }
-    var lowAmmoThreshold: Int { Int(floor(Double(max(4,rules.batteryAmmo))*0.20)) }
+    // Per-battery loadout grows by two rounds every wave.
+    // A custom starting wave receives the ammunition for that wave.
+    var ammoPerBattery: Int { max(4,min(30,rules.batteryAmmo)) + max(0,wave-1)*2 }
+    var lowAmmoThreshold: Int { Int(floor(Double(ammoPerBattery)*0.20)) }
     func isLowAmmo(_ bank: Int) -> Bool {
         ammo.indices.contains(bank) && ammo[bank] <= lowAmmoThreshold
     }
@@ -414,7 +417,7 @@ private final class BarrageGame: ObservableObject {
         isFiringStream=false; repeatFireTime=0
         atomicShots=[];atomicBursts=[];supplyTruck=nil;bomber=nil;fallingBombs=[];bomberExplosions=[]
         screenShake=0;nextBomberTime=gameSeconds + Double.random(in:13...18)
-        ammo = Array(repeating: max(4,min(30,rules.batteryAmmo)),count:3)
+        ammo = Array(repeating: ammoPerBattery,count:3)
         spawned = 0; spawnTimer = 0; recovery = 1.4; lastWaveBatch = -1
         pattern = wave < 2 ? .wide : [.wide,.flank,.cluster,.mirv][(wave-1)%4]
         assault = pattern.rawValue
@@ -931,7 +934,7 @@ private struct BarrageWindow: View {
         VStack(spacing:0) {
             HStack(spacing:14) {
                 Text("VECTOR BARRAGE").font(.system(size:16,weight:.heavy,design:.monospaced)).tracking(2)
-                Text("v1.1.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
+                Text("v1.1.1").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
                 Spacer()
                 Picker("Display",selection:$game.mode) {
                     ForEach(VisualMode.allCases) { Text($0.rawValue).tag($0) }
@@ -1006,7 +1009,10 @@ private struct BarrageWindow: View {
                 Text("Apply these rules to a new battle. Current progress will restart.")
                     .foregroundStyle(.secondary)
                 Stepper("Starting wave: \(editRules.startingWave)",value:$editRules.startingWave,in:1...20)
-                Stepper("Interceptors per battery: \(editRules.batteryAmmo)",value:$editRules.batteryAmmo,in:4...30)
+                Stepper("Starting interceptors per battery: \(editRules.batteryAmmo)",
+                        value:$editRules.batteryAmmo,in:4...30)
+                Text("+2 rounds per battery for each new wave")
+                    .font(.caption).foregroundStyle(.secondary)
                 VStack(alignment:.leading) {
                     Text("Incoming missiles per wave: \(editRules.waveSize)%")
                     Slider(value:Binding(get:{Double(editRules.waveSize)},set:{editRules.waveSize=Int($0)}),
