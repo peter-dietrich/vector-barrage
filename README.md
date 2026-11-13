@@ -4,7 +4,7 @@ Native macOS missile-defense arcade game and fifth built-in Fun City cabinet.
 
 ## Current build
 
-**v1.0.0 — day/night scenery and Tab battery cycling**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
+**v1.1.0 — armored meteors and fragmentation threats**. Original SwiftUI + AppKit implementation for macOS 13+ with no third-party packages.
 
 - Defend six cities using three selectable interceptor batteries.
 - Enemy missiles, expanding interception zones, chain-reaction scoring and splitting missiles in later waves.
@@ -104,3 +104,12 @@ An original game inspired by the classic missile-defense arcade genre. No Atari/
 - Modern mode now features a wave-sensitive gradient sky with a dim sun/moon, a seeded procedural starfield in the spirit of Vector Drift, slowly drifting clouds, and three significantly more varied layered mountain ridges with atmospheric depth.
 - Stars fade in sunlight, distant mountains brighten and desaturate by day, and ambient scenery colors shift with daylight. Gameplay effects and threat contrast remain prioritized. Classic mode remains simple.
 - Saves retain the current scenery seed and time; earlier saves use a safe default.
+
+## v1.1.0 meteor encounters
+
+- From **wave 3**, slowly descending armored meteors enter the sky. Each meteor requires **three separate interceptor explosion hits** to destroy. Three small armor indicators and increasingly visible cracks show damage.
+- Upon the third hit the meteor breaks apart in a dramatic white flash, shockwave, debris shower and screen shake. The existing reduced-flash setting reduces the flash. A distinct crack and shatter sound accompanies impact.
+- Each breakup releases **four independently interceptable, dangerous fragments** with diverging paths. Fragments cannot be erased by the same pre-existing explosion that shattered the parent meteor; subsequent blasts can destroy them.
+- Waves **3–5 feature one meteor per wave**. Wave 6 onward retains at least one meteor, with increasing random chances of a second (and an occasional third on much later waves).
+- Meteors and unneutralized fragments can destroy surviving cities. Wave completion waits for all scheduled meteors and their fragments to resolve.
+- Meteor health, hit-blast IDs, active meteor positions, and wave scheduling are included in saved battles. Earlier saves remain readable.
