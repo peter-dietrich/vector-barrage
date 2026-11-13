@@ -48,6 +48,36 @@ private struct Burst: Identifiable, Codable {
     var interceptionCount: Int? = nil
     var radius: Double { maxRadius * max(0, sin(min(1, age/1.05) * .pi)) }
 }
+private struct SupplyTruck: Codable {
+    var progress = 0.0
+    var duration = 3.0
+}
+private struct AtomicInterceptor: Identifiable, Codable {
+    var id = UUID()
+    var battery: Int
+    var point: Point2
+    var destination: Point2
+    var age = 0.0
+}
+private struct AtomicDetonation: Identifiable {
+    var id = UUID()
+    var point: Point2
+    var age = 0.0
+    var intercepted: Int
+}
+private struct StealthBomber: Identifiable, Codable {
+    var id = UUID()
+    var point: Point2
+    var direction: Double
+    var speed: Double
+    var health = 1
+    var dropCooldown = 2.5
+}
+private struct BomberExplosion: Identifiable {
+    var id = UUID()
+    var point: Point2
+    var age = 0.0
+}
 private struct TripleBonusFX: Identifiable {
     var id = UUID()
     var count: Int
@@ -108,6 +138,12 @@ private struct SavedBattle: Codable, Identifiable {
     var recovery: Double
     var gameSeconds: Double
     var lastIntercept: Double
+    // Optional additions keep v0.5/v0.6 save slots decodable.
+    var nuclearAvailable: [Bool]? = nil
+    var atomicShots: [AtomicInterceptor]? = nil
+    var supplyTruck: SupplyTruck? = nil
+    var bomber: StealthBomber? = nil
+    var nextBomberTime: Double? = nil
 }
 @MainActor
 private enum BattleStore {
@@ -147,6 +183,10 @@ private final class ArcadeAudio {
         case "chain": duration=0.46;freq=550;volume=0.43
         case "triple": duration=0.72;freq=850;volume=0.51
         case "alert": duration=0.24;freq=290;volume=0.30
+        case "truck": duration=0.29;freq=165;volume=0.24
+        case "nuke": duration=0.62;freq=110;volume=0.46
+        case "bomber": duration=0.34;freq=240;volume=0.26
+        case "airburst": duration=1.05;freq=95;volume=0.52
         case "city": duration=1.5;freq=75;volume=0.70
         case "wave": duration=0.65;freq=620;volume=0.30
         default: duration=0.12;freq=250;volume=0.20
@@ -201,6 +241,15 @@ private final class BarrageGame: ObservableObject {
     @Published var launches: [LaunchFX] = []
     @Published var nuclear: [NuclearFX] = []
     @Published var tripleBonus: TripleBonusFX?
+    @Published var nuclearAvailable = [true,true,true]
+    @Published var atomicShots: [AtomicInterceptor] = []
+    @Published var atomicBursts: [AtomicDetonation] = []
+    @Published var supplyTruck: SupplyTruck?
+    @Published var bomber: StealthBomber?
+    @Published var bomberExplosions: [BomberExplosion] = []
+    @Published var screenShake = 0.0
+    private var nextBomberTime = 12.0
+    var nuclearRemaining: Int { nuclearAvailable.filter { $0 }.count }
     private var lastAlertTone = -100.0
     @Published var rules = GameRules()
     private let audio = ArcadeAudio()
@@ -236,7 +285,7 @@ private final class BarrageGame: ObservableObject {
     private var lastIntercept = -100.0
     private var lastTick: Date?
     var alive: Int { cities.filter { $0 }.count }
-    // A warning applies only to an active city target and the LAST 10% of
+    // A warning applies only to an active city target and the LAST 25% of
     // that missile's own trajectory, including split child missiles.
     var criticalThreatCount: Int {
         hostiles.filter { missile in
@@ -245,7 +294,7 @@ private final class BarrageGame: ObservableObject {
             }
             let full = missile.origin.distance(missile.target)
             return targetActive && full > 0 &&
-                missile.point.distance(missile.target) / full <= 0.10
+                missile.point.distance(missile.target) / full <= 0.25
         }.count
     }
     var proximityPulseOn: Bool { Int(gameSeconds*3).isMultiple(of:2) }
@@ -253,6 +302,9 @@ private final class BarrageGame: ObservableObject {
     func start() {
         hostiles = []; defenses = []; bursts = []; launches = []
         hitStreak = 0; battlePulse = 0; tripleBonus = nil; lastAlertTone = -100
+        nuclearAvailable = [true,true,true];atomicShots=[];atomicBursts=[]
+        supplyTruck=nil;bomber=nil;bomberExplosions=[];screenShake=0
+        nextBomberTime=12
         cities = Array(repeating: true, count: 6)
         score = 0; wave = max(1,min(20,rules.startingWave)); selected = 1
         combo = 0; bestCombo = 0; totalIntercepts = 0; gameSeconds = 0
@@ -262,6 +314,8 @@ private final class BarrageGame: ObservableObject {
     private func nextWave() {
         hostiles = []; defenses = []; bursts = []; impacts = []; launches = []
         hitStreak = 0; battlePulse = 0; tripleBonus = nil; lastAlertTone = -100
+        atomicShots=[];atomicBursts=[];supplyTruck=nil;bomber=nil;bomberExplosions=[]
+        screenShake=0;nextBomberTime=gameSeconds + Double.random(in:13...18)
         ammo = Array(repeating: max(4,min(30,rules.batteryAmmo)),count:3)
         spawned = 0; spawnTimer = 0; recovery = 1.4; lastWaveBatch = -1
         pattern = wave < 2 ? .wide : [.wide,.flank,.cluster,.mirv][(wave-1)%4]
@@ -273,6 +327,31 @@ private final class BarrageGame: ObservableObject {
     }
     func select(_ n: Int) { if (0..<3).contains(n) { selected = n } }
     func cycleBattery() { selected = (selected + 1) % batteries.count }
+    func redistributeAmmo() {
+        guard running && !paused && !waiting && supplyTruck == nil else { return }
+        let total=ammo.reduce(0,+)
+        guard total > 0 && ammo.max() != ammo.min() else {
+            message="AMMUNITION ALREADY BALANCED"
+            return
+        }
+        supplyTruck=SupplyTruck()
+        message="SUPPLY TRUCK DEPLOYED — 3 SECONDS"
+        audio.play("truck",enabled:rules.soundEnabled)
+    }
+    func launchNuclear() {
+        let bank=selected
+        guard running && !paused && !waiting &&
+            nuclearAvailable.indices.contains(bank) && nuclearAvailable[bank] else { return }
+        guard !hostiles.isEmpty else { message="NO INBOUND TARGETS FOR NUCLEAR INTERCEPT";return }
+        nuclearAvailable[bank]=false
+        let centerward=tan(Double.pi/9) * (ground-0.44)
+        let destination=Point2(x:batteries[bank]+(bank == 0 ? centerward : bank == 2 ? -centerward : 0),y:0.44)
+        atomicShots.append(AtomicInterceptor(battery:bank,
+            point:Point2(x:batteries[bank],y:ground),destination:destination))
+        launches.append(LaunchFX(point:Point2(x:batteries[bank],y:ground)))
+        message="NUCLEAR INTERCEPTOR — \(bank+1) OF 3"
+        audio.play("nuke",enabled:rules.soundEnabled)
+    }
     func fire(_ location: Point2) {
         guard running && !paused && !waiting && ammo[selected] > 0 else { return }
         let target = Point2(x: max(0.02,min(0.98,location.x)), y: max(0.03,min(0.81,location.y)))
@@ -294,6 +373,8 @@ private final class BarrageGame: ObservableObject {
         case "\r", "\n":
             if !running || gameOver { start() }
             else if waiting { wave += 1; nextWave() }
+        case "t": redistributeAmmo()
+        case "n": launchNuclear()
         case "p": togglePause()
         case "r": start()
         case " ": fire(aim)
@@ -310,6 +391,73 @@ private final class BarrageGame: ObservableObject {
         }
         guard running && !paused && !waiting else { return }
         gameSeconds += dt
+        screenShake = max(0,screenShake-dt*1.25)
+        for i in bomberExplosions.indices { bomberExplosions[i].age += dt }
+        bomberExplosions.removeAll { $0.age > 1.4 }
+        for i in atomicBursts.indices { atomicBursts[i].age += dt }
+        atomicBursts.removeAll { $0.age > 1.45 }
+        if supplyTruck != nil {
+            supplyTruck!.progress = min(1,supplyTruck!.progress + dt/supplyTruck!.duration)
+            if supplyTruck!.progress >= 1 {
+                // Redistribute exactly the rounds that REMAIN at arrival.
+                let rounds=ammo.reduce(0,+)
+                let each=rounds/3
+                let extra=rounds%3
+                for bank in 0..<3 { ammo[bank]=each+(bank<extra ? 1 : 0) }
+                supplyTruck=nil
+                message="AMMUNITION REDISTRIBUTED — \(rounds) ROUNDS"
+                audio.play("truck",enabled:rules.soundEnabled)
+            }
+        }
+        var detonated: [AtomicInterceptor] = []
+        for i in atomicShots.indices {
+            atomicShots[i].age += dt
+            atomicShots[i].point=atomicShots[i].point.moved(to:atomicShots[i].destination,amount:0.80*dt)
+            if atomicShots[i].point.distance(atomicShots[i].destination) < 0.00001 {
+                detonated.append(atomicShots[i])
+            }
+        }
+        atomicShots.removeAll { shot in detonated.contains { $0.id == shot.id } }
+        for shot in detonated {
+            // Destructively select nearest third of current inbound missiles;
+            // no invulnerability and no new rounds manufactured.
+            let quota=(hostiles.count+2)/3
+            let targets=hostiles.sorted {
+                $0.point.distance(shot.destination) < $1.point.distance(shot.destination)
+            }.prefix(quota)
+            let ids=Set(targets.map(\.id))
+            hostiles.removeAll { ids.contains($0.id) }
+            score += quota*45
+            totalIntercepts += quota
+            atomicBursts.append(AtomicDetonation(point:shot.destination,intercepted:quota))
+            battlePulse=max(battlePulse,0.45)
+            screenShake=max(screenShake,0.55)
+            message="NUCLEAR INTERCEPT — \(quota) THREATS NEUTRALIZED"
+            audio.play("airburst",enabled:rules.soundEnabled)
+        }
+        if wave >= 2 && gameSeconds >= nextBomberTime && bomber == nil {
+            let direction=Bool.random() ? 1.0 : -1.0
+            bomber=StealthBomber(point:Point2(x:direction > 0 ? -0.07 : 1.07,
+                y:Double.random(in:0.20...0.37)),direction:direction,
+                speed:min(0.21,0.115+Double(wave)*0.008))
+            nextBomberTime=gameSeconds+Double.random(in:14...22)
+            message="STEALTH BOMBER INBOUND"
+            audio.play("bomber",enabled:rules.soundEnabled)
+        }
+        if bomber != nil {
+            bomber!.point.x += bomber!.direction*bomber!.speed*dt
+            bomber!.dropCooldown -= dt
+            if bomber!.dropCooldown <= 0 && bomber!.point.x > 0.07 && bomber!.point.x < 0.93 {
+                bomber!.dropCooldown=Double.random(in:2.1...3.4)
+                if let city=cityLocations.indices.filter({cities[$0]}).randomElement() {
+                    let source=bomber!.point
+                    hostiles.append(Hostile(origin:source,point:source,
+                        target:Point2(x:cityLocations[city],y:ground),
+                        speed:0.15*difficulty.multiplier,splits:false))
+                }
+            }
+            if bomber!.point.x < -0.14 || bomber!.point.x > 1.14 { bomber=nil }
+        }
         if tripleBonus != nil {
             tripleBonus!.age += dt
             if tripleBonus!.age >= 1.65 { tripleBonus = nil }
@@ -362,6 +510,17 @@ private final class BarrageGame: ObservableObject {
         defenses.removeAll { $0.point.distance($0.target) < 0.00001 }
         for i in bursts.indices { bursts[i].age += dt }
         bursts.removeAll { $0.age >= 1.05 }
+        if let aircraft=bomber, bursts.contains(where: {
+            !$0.hostile && $0.radius > 0 && $0.point.distance(aircraft.point) < $0.radius+0.045
+        }) {
+            bomber=nil
+            bomberExplosions.append(BomberExplosion(point:aircraft.point))
+            screenShake=max(screenShake,0.95)
+            battlePulse=max(battlePulse,0.55)
+            score += 450
+            message="BOMBER DESTROYED  +450"
+            audio.play("airburst",enabled:rules.soundEnabled)
+        }
         var removed = Set<UUID>()
         // A defensive explosion may destroy any number of missiles: chain reaction scoring.
         var kills: [Hostile] = []
@@ -430,7 +589,7 @@ private final class BarrageGame: ObservableObject {
         if alive == 0 {
             running = false; gameOver = true
             message = "GAME OVER — SCORE \(score)"
-        } else if spawned >= quota && hostiles.isEmpty && defenses.isEmpty {
+        } else if spawned >= quota && hostiles.isEmpty && defenses.isEmpty && bomber == nil && atomicShots.isEmpty {
             waiting = true
             let bonus = alive*100 + ammo.reduce(0,+)*5 + bestCombo*20
             score += bonus
@@ -445,7 +604,9 @@ private final class BarrageGame: ObservableObject {
             score:score,wave:wave,running:running,waiting:waiting,gameOver:gameOver,
             combo:combo,bestCombo:bestCombo,totalIntercepts:totalIntercepts,spawned:spawned,
             spawnTimer:spawnTimer,quota:quota,pattern:pattern,lastWaveBatch:lastWaveBatch,
-            recovery:recovery,gameSeconds:gameSeconds,lastIntercept:lastIntercept)
+            recovery:recovery,gameSeconds:gameSeconds,lastIntercept:lastIntercept,
+            nuclearAvailable:nuclearAvailable,atomicShots:atomicShots,
+            supplyTruck:supplyTruck,bomber:bomber,nextBomberTime:nextBomberTime)
         BattleStore.insert(battle)
         message="GAME SAVED — WAVE \(wave)"
         return true
@@ -460,6 +621,12 @@ private final class BarrageGame: ObservableObject {
         pattern=b.pattern;assault=b.pattern.rawValue
         lastWaveBatch=b.lastWaveBatch;recovery=b.recovery
         gameSeconds=b.gameSeconds;lastIntercept=b.lastIntercept
+        nuclearAvailable=b.nuclearAvailable ?? [true,true,true]
+        atomicShots=b.atomicShots ?? []
+        supplyTruck=b.supplyTruck
+        bomber=b.bomber
+        nextBomberTime=b.nextBomberTime ?? (gameSeconds+15)
+        bomberExplosions=[];atomicBursts=[];screenShake=0
         impacts=[];launches=[];nuclear=[];tripleBonus=nil;lastAlertTone = -100
         battlePulse=0;hitStreak=0
         lastTick=nil;paused=true
@@ -496,7 +663,7 @@ private struct BarrageWindow: View {
         VStack(spacing:0) {
             HStack(spacing:14) {
                 Text("VECTOR BARRAGE").font(.system(size:16,weight:.heavy,design:.monospaced)).tracking(2)
-                Text("v0.6.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
+                Text("v0.7.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
                 Spacer()
                 Picker("Display",selection:$game.mode) {
                     ForEach(VisualMode.allCases) { Text($0.rawValue).tag($0) }
@@ -507,6 +674,8 @@ private struct BarrageWindow: View {
                 Toggle(isOn: $game.rules.soundEnabled) {
                     Image(systemName:game.rules.soundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
                 }.toggleStyle(.button).help("Arcade sound effects")
+                Button("Truck") { game.redistributeAmmo() }.help("T: balance rounds via 3-second supply truck")
+                Button("Nuclear") { game.launchNuclear() }.help("N: fire selected battery's one nuclear interceptor")
                 Button("Custom Game") { editRules=game.rules;showCustom=true }
                 Button("Save Game") {
                     if game.saveBattle() { saveNotice="Battle saved." }
@@ -554,7 +723,7 @@ private struct BarrageWindow: View {
             HStack {
                 Text(game.message).foregroundStyle(.orange)
                 Spacer()
-                Text("CLICK FIRE   CONTROL CYCLE BATTERY   P PAUSE   RETURN START/NEXT WAVE")
+                Text("CLICK FIRE   CTRL BATTERY   T TRUCK   N NUCLEAR   P PAUSE   RETURN NEXT")
                     .foregroundStyle(.white.opacity(0.52))
             }
             .font(.system(size:10,weight:.semibold,design:.monospaced))
@@ -992,7 +1161,7 @@ private struct BarrageTelemetry: View {
                             Text("PROXIMITY ALERT")
                         }
                         .font(.system(size:12,weight:.black,design:.monospaced))
-                        Text("\(game.criticalThreatCount) MISSILE(S) / FINAL 10%")
+                        Text("\(game.criticalThreatCount) MISSILE(S) / FINAL 25%")
                             .font(.system(size:10,weight:.bold,design:.monospaced))
                     }
                     .foregroundStyle(game.proximityPulseOn ? Color.white : Color.red)
@@ -1002,7 +1171,7 @@ private struct BarrageTelemetry: View {
                                 in:RoundedRectangle(cornerRadius:5))
                     .overlay(RoundedRectangle(cornerRadius:5).stroke(Color.red,lineWidth:1))
                     .padding(.top,13)
-                    .accessibilityLabel("Proximity alert: \(game.criticalThreatCount) missiles in final ten percent")
+                    .accessibilityLabel("Proximity alert: \(game.criticalThreatCount) missiles in final twenty-five percent")
                 }
                 Spacer(minLength: 9)
                 Text(game.difficulty.rawValue.uppercased() + "  /  " + game.mode.rawValue.uppercased())
