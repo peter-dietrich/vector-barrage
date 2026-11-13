@@ -131,12 +131,79 @@ private struct NuclearFX: Identifiable, Codable {
     var age = 0.0
 }
 private struct GameRules: Codable {
+    // Defaults are the standard arcade balance. Changes apply on New Game.
     var startingWave = 1
     var batteryAmmo = 15
+    var ammoGrowth = 2
     var waveSize = 100
     var missileSpeed = 100
+    var missileSpawnRate = 100
+    var interceptorSpeed = 100
+    var fireRate = 5
+    var explosionRadius = 100
+    var mirvEnabled = true
+    var meteorEnabled = true
+    var meteorFirstWave = 3
+    var meteorHealth = 3
+    var meteorFragments = 4
+    var meteorSpeed = 100
+    var meteorFrequency = 100
+    var bomberEnabled = true
+    var bomberFirstWave = 2
+    var bomberFrequency = 100
+    var bomberSpeed = 100
+    var nuclearEnabled = true
+    var supplyTruckSeconds = 3
+    var lowAmmoPercent = 20
+    var proximityPercent = 25
+    var multiKillBonus = 300
     var soundEnabled = true
     var reducedFlash = false
+    var sceneryEnabled = true
+    var starsEnabled = true
+    var cloudsEnabled = true
+    var randomStartHour = true
+    var startHour = 12
+    var hoursPerWave = 2.75
+    // Decode every field independently so existing save files are compatible.
+    init() {}
+    init(from decoder: Decoder) throws {
+        let d=try decoder.container(keyedBy:CodingKeys.self)
+        let defaults=GameRules()
+        startingWave=try d.decodeIfPresent(Int.self,forKey:.startingWave) ?? defaults.startingWave
+        batteryAmmo=try d.decodeIfPresent(Int.self,forKey:.batteryAmmo) ?? defaults.batteryAmmo
+        ammoGrowth=try d.decodeIfPresent(Int.self,forKey:.ammoGrowth) ?? defaults.ammoGrowth
+        waveSize=try d.decodeIfPresent(Int.self,forKey:.waveSize) ?? defaults.waveSize
+        missileSpeed=try d.decodeIfPresent(Int.self,forKey:.missileSpeed) ?? defaults.missileSpeed
+        missileSpawnRate=try d.decodeIfPresent(Int.self,forKey:.missileSpawnRate) ?? defaults.missileSpawnRate
+        interceptorSpeed=try d.decodeIfPresent(Int.self,forKey:.interceptorSpeed) ?? defaults.interceptorSpeed
+        fireRate=try d.decodeIfPresent(Int.self,forKey:.fireRate) ?? defaults.fireRate
+        explosionRadius=try d.decodeIfPresent(Int.self,forKey:.explosionRadius) ?? defaults.explosionRadius
+        mirvEnabled=try d.decodeIfPresent(Bool.self,forKey:.mirvEnabled) ?? defaults.mirvEnabled
+        meteorEnabled=try d.decodeIfPresent(Bool.self,forKey:.meteorEnabled) ?? defaults.meteorEnabled
+        meteorFirstWave=try d.decodeIfPresent(Int.self,forKey:.meteorFirstWave) ?? defaults.meteorFirstWave
+        meteorHealth=try d.decodeIfPresent(Int.self,forKey:.meteorHealth) ?? defaults.meteorHealth
+        meteorFragments=try d.decodeIfPresent(Int.self,forKey:.meteorFragments) ?? defaults.meteorFragments
+        meteorSpeed=try d.decodeIfPresent(Int.self,forKey:.meteorSpeed) ?? defaults.meteorSpeed
+        meteorFrequency=try d.decodeIfPresent(Int.self,forKey:.meteorFrequency) ?? defaults.meteorFrequency
+        bomberEnabled=try d.decodeIfPresent(Bool.self,forKey:.bomberEnabled) ?? defaults.bomberEnabled
+        bomberFirstWave=try d.decodeIfPresent(Int.self,forKey:.bomberFirstWave) ?? defaults.bomberFirstWave
+        bomberFrequency=try d.decodeIfPresent(Int.self,forKey:.bomberFrequency) ?? defaults.bomberFrequency
+        bomberSpeed=try d.decodeIfPresent(Int.self,forKey:.bomberSpeed) ?? defaults.bomberSpeed
+        nuclearEnabled=try d.decodeIfPresent(Bool.self,forKey:.nuclearEnabled) ?? defaults.nuclearEnabled
+        supplyTruckSeconds=try d.decodeIfPresent(Int.self,forKey:.supplyTruckSeconds) ?? defaults.supplyTruckSeconds
+        lowAmmoPercent=try d.decodeIfPresent(Int.self,forKey:.lowAmmoPercent) ?? defaults.lowAmmoPercent
+        proximityPercent=try d.decodeIfPresent(Int.self,forKey:.proximityPercent) ?? defaults.proximityPercent
+        multiKillBonus=try d.decodeIfPresent(Int.self,forKey:.multiKillBonus) ?? defaults.multiKillBonus
+        soundEnabled=try d.decodeIfPresent(Bool.self,forKey:.soundEnabled) ?? defaults.soundEnabled
+        reducedFlash=try d.decodeIfPresent(Bool.self,forKey:.reducedFlash) ?? defaults.reducedFlash
+        sceneryEnabled=try d.decodeIfPresent(Bool.self,forKey:.sceneryEnabled) ?? defaults.sceneryEnabled
+        starsEnabled=try d.decodeIfPresent(Bool.self,forKey:.starsEnabled) ?? defaults.starsEnabled
+        cloudsEnabled=try d.decodeIfPresent(Bool.self,forKey:.cloudsEnabled) ?? defaults.cloudsEnabled
+        randomStartHour=try d.decodeIfPresent(Bool.self,forKey:.randomStartHour) ?? defaults.randomStartHour
+        startHour=try d.decodeIfPresent(Int.self,forKey:.startHour) ?? defaults.startHour
+        hoursPerWave=try d.decodeIfPresent(Double.self,forKey:.hoursPerWave) ?? defaults.hoursPerWave
+    }
 }
 private struct SavedBattle: Codable, Identifiable {
     var id = UUID()
@@ -344,12 +411,12 @@ private final class BarrageGame: ObservableObject {
     @Published var isFiringStream = false
     private var repeatFireTime = 0.0
     private var lastEmptySound = Date.distantPast
-    private let streamInterval = 0.19
+    private var streamInterval: Double { 1.0 / Double(max(1,rules.fireRate)) }
     var alive: Int { cities.filter { $0 }.count }
     // Per-battery loadout grows by two rounds every wave.
     // A custom starting wave receives the ammunition for that wave.
-    var ammoPerBattery: Int { max(4,min(30,rules.batteryAmmo)) + max(0,wave-1)*2 }
-    var lowAmmoThreshold: Int { Int(floor(Double(ammoPerBattery)*0.20)) }
+    var ammoPerBattery: Int { max(4,min(30,rules.batteryAmmo)) + max(0,wave-1)*rules.ammoGrowth }
+    var lowAmmoThreshold: Int { Int(floor(Double(ammoPerBattery)*Double(rules.lowAmmoPercent)/100)) }
     func isLowAmmo(_ bank: Int) -> Bool {
         ammo.indices.contains(bank) && ammo[bank] <= lowAmmoThreshold
     }
@@ -358,7 +425,7 @@ private final class BarrageGame: ObservableObject {
         var threatened = Set<Int>()
         for missile in hostiles {
             let distance = missile.origin.distance(missile.target)
-            guard distance > 0 && missile.point.distance(missile.target) / distance <= 0.25 else { continue }
+            guard distance > 0 && missile.point.distance(missile.target) / distance <= Double(rules.proximityPercent)/100 else { continue }
             if let index=cityLocations.indices.min(by: {
                 abs(cityLocations[$0]-missile.target.x) < abs(cityLocations[$1]-missile.target.x)
             }), cities[index], abs(cityLocations[index]-missile.target.x) < 0.09 {
@@ -376,7 +443,7 @@ private final class BarrageGame: ObservableObject {
             }
             let full = missile.origin.distance(missile.target)
             return targetActive && full > 0 &&
-                missile.point.distance(missile.target) / full <= 0.25
+                missile.point.distance(missile.target) / full <= Double(rules.proximityPercent)/100
         }.count
     }
     var proximityPulseOn: Bool { Int(gameSeconds*3).isMultiple(of:2) }
@@ -385,14 +452,14 @@ private final class BarrageGame: ObservableObject {
         hostiles = []; defenses = []; bursts = []; launches = []
         hitStreak = 0; battlePulse = 0; tripleBonus = nil; lastAlertTone = -100
         isFiringStream=false; repeatFireTime=0
-        nuclearAvailable = [true,true,true];atomicShots=[];atomicBursts=[]
+        nuclearAvailable = Array(repeating:rules.nuclearEnabled,count:3);atomicShots=[];atomicBursts=[]
         supplyTruck=nil;bomber=nil;fallingBombs=[];bomberExplosions=[];screenShake=0
         nextBomberTime=12
         cities = Array(repeating: true, count: 6)
         meteors=[];meteorBreakups=[];meteorFlash=0
         meteorQuota=0;meteorSpawned=0
         // Fresh games begin at random hours, then progress 2.75 hours per wave.
-        timeOfDay = Double.random(in:0..<24)
+        timeOfDay = rules.randomStartHour ? Double.random(in:0..<24) : Double(rules.startHour)
         scenerySeed = Int.random(in:1...100_000)
         score = 0; wave = max(1,min(20,rules.startingWave)); selected = 1
         combo = 0; bestCombo = 0; totalIntercepts = 0; gameSeconds = 0
@@ -401,22 +468,24 @@ private final class BarrageGame: ObservableObject {
     }
     private func nextWave() {
         if wave > max(1,min(20,rules.startingWave)) {
-            timeOfDay = (timeOfDay + 2.75).truncatingRemainder(dividingBy:24)
+            timeOfDay = (timeOfDay + rules.hoursPerWave).truncatingRemainder(dividingBy:24)
         }
         hostiles = []; defenses = []; bursts = []; impacts = []; launches = []
         meteors=[];meteorBreakups=[];meteorFlash=0
-        // One meteor each for waves 3–5, then a rising chance of extras.
-        meteorQuota = wave < 3 ? 0 : wave <= 5 ? 1 :
-            1 + (Int.random(in:0..<100) < min(75,12+(wave-6)*6) ? 1 : 0)
-        if wave >= 12 && Int.random(in:0..<100) < min(48,(wave-11)*5) {
+        meteorQuota = (!rules.meteorEnabled || wave < rules.meteorFirstWave) ? 0 :
+            wave <= rules.meteorFirstWave+2 ? 1 :
+            1 + (Int.random(in:0..<100) < min(95,
+                (12+(wave-rules.meteorFirstWave-3)*6)*rules.meteorFrequency/100) ? 1 : 0)
+        if rules.meteorEnabled && wave >= rules.meteorFirstWave+9 &&
+           Int.random(in:0..<100) < min(80,(wave-rules.meteorFirstWave-8)*5*rules.meteorFrequency/100) {
             meteorQuota += 1
         }
         meteorSpawned=0
-        nextMeteorTime=gameSeconds+4.0
+        nextMeteorTime=gameSeconds+4.0*100/Double(max(25,rules.meteorFrequency))
         hitStreak = 0; battlePulse = 0; tripleBonus = nil; lastAlertTone = -100
         isFiringStream=false; repeatFireTime=0
         atomicShots=[];atomicBursts=[];supplyTruck=nil;bomber=nil;fallingBombs=[];bomberExplosions=[]
-        screenShake=0;nextBomberTime=gameSeconds + Double.random(in:13...18)
+        screenShake=0;nextBomberTime=gameSeconds + Double.random(in:13...18)*100/Double(max(25,rules.bomberFrequency))
         ammo = Array(repeating: ammoPerBattery,count:3)
         spawned = 0; spawnTimer = 0; recovery = 1.4; lastWaveBatch = -1
         pattern = wave < 2 ? .wide : [.wide,.flank,.cluster,.mirv][(wave-1)%4]
@@ -435,13 +504,13 @@ private final class BarrageGame: ObservableObject {
             message="AMMUNITION ALREADY BALANCED"
             return
         }
-        supplyTruck=SupplyTruck()
+        supplyTruck=SupplyTruck(progress:0,duration:Double(rules.supplyTruckSeconds))
         message="SUPPLY TRUCK DEPLOYED — 3 SECONDS"
         audio.play("truck",enabled:rules.soundEnabled)
     }
     func launchNuclear() {
         let bank=selected
-        guard running && !paused && !waiting &&
+        guard rules.nuclearEnabled && running && !paused && !waiting &&
             nuclearAvailable.indices.contains(bank) && nuclearAvailable[bank] else { return }
         guard !hostiles.isEmpty else { message="NO INBOUND TARGETS FOR NUCLEAR INTERCEPT";return }
         nuclearAvailable[bank]=false
@@ -519,7 +588,7 @@ private final class BarrageGame: ObservableObject {
         if meteorSpawned < meteorQuota && gameSeconds >= nextMeteorTime {
             spawnMeteor()
             meteorSpawned += 1
-            nextMeteorTime=gameSeconds+Double.random(in:7.5...11.5)
+            nextMeteorTime=gameSeconds+Double.random(in:7.5...11.5)*100/Double(max(25,rules.meteorFrequency))
         }
         if isFiringStream {
             repeatFireTime += dt
@@ -573,12 +642,12 @@ private final class BarrageGame: ObservableObject {
             message="NUCLEAR INTERCEPT — \(quota) THREATS NEUTRALIZED"
             audio.play("airburst",enabled:rules.soundEnabled)
         }
-        if wave >= 2 && gameSeconds >= nextBomberTime && bomber == nil {
+        if rules.bomberEnabled && wave >= rules.bomberFirstWave && gameSeconds >= nextBomberTime && bomber == nil {
             let direction=Bool.random() ? 1.0 : -1.0
             bomber=StealthBomber(point:Point2(x:direction > 0 ? -0.07 : 1.07,
                 y:Double.random(in:0.20...0.37)),direction:direction,
-                speed:min(0.21,0.115+Double(wave)*0.008))
-            nextBomberTime=gameSeconds+Double.random(in:14...22)
+                speed:min(0.32,(0.115+Double(wave)*0.008)*Double(rules.bomberSpeed)/100))
+            nextBomberTime=gameSeconds+Double.random(in:14...22)*100/Double(max(25,rules.bomberFrequency))
             message="STEALTH BOMBER INBOUND"
             audio.play("bomber",enabled:rules.soundEnabled)
         }
@@ -665,7 +734,7 @@ private final class BarrageGame: ObservableObject {
             message = "NEXT FORMATION INBOUND"
         }
         if recovery == 0 { spawnTimer += dt }
-        let interval = max(0.36,difficulty.interval * pow(0.94,Double(wave-1)))
+        let interval = max(0.24,difficulty.interval * pow(0.94,Double(wave-1)) * 100/Double(max(25,rules.missileSpawnRate)))
         if recovery == 0 && spawned < quota && spawnTimer >= interval && hostiles.count < (difficulty == .ace ? 10 : 8) {
             spawnTimer -= interval
             spawnEnemy()
@@ -686,11 +755,11 @@ private final class BarrageGame: ObservableObject {
         }
         hostiles.append(contentsOf:children)
         for i in defenses.indices {
-            defenses[i].point = defenses[i].point.moved(to:defenses[i].target,amount:1.23*dt)
+            defenses[i].point = defenses[i].point.moved(to:defenses[i].target,amount:1.23*dt*Double(rules.interceptorSpeed)/100)
         }
         let arriving = defenses.filter { $0.point.distance($0.target) < 0.00001 }
         for shot in arriving {
-            bursts.append(Burst(point:shot.target,maxRadius:0.108,hostile:false))
+            bursts.append(Burst(point:shot.target,maxRadius:0.108*Double(rules.explosionRadius)/100,hostile:false))
         }
         defenses.removeAll { $0.point.distance($0.target) < 0.00001 }
         for i in bursts.indices { bursts[i].age += dt }
@@ -714,7 +783,7 @@ private final class BarrageGame: ObservableObject {
                 }
                 audio.play(meteor.health == 0 ? "meteor" : "crack",enabled:rules.soundEnabled)
                 if meteor.health > 0 {
-                    message="METEOR ARMOR  \(meteor.health)/3"
+                    message="METEOR ARMOR  \(meteor.health)/\(rules.meteorHealth)"
                 }
             }
             if meteor.health <= 0 {
@@ -765,7 +834,7 @@ private final class BarrageGame: ObservableObject {
                 let count = bursts[index].interceptionCount ?? 0
                 if count == 3 {
                     // Once per interceptor blast upon the third incoming missile.
-                    blastBonuses.append((count,300))
+                    blastBonuses.append((count,rules.multiKillBonus))
                 } else if count > 3 {
                     // Modest extra reward for each additional intercept.
                     blastBonuses.append((count,100))
@@ -877,7 +946,7 @@ private final class BarrageGame: ObservableObject {
         let start=Point2(x:Double.random(in:0.16...0.84),y:-0.04)
         let speed=min(0.071,0.040+Double(max(0,wave-3))*0.0012)
         meteors.append(Meteor(point:start,target:Point2(x:cityLocations[city],y:ground),
-                              speed:speed))
+                              speed:speed*Double(rules.meteorSpeed)/100,health:rules.meteorHealth))
         message="METEOR INBOUND — THREE HITS REQUIRED"
     }
     private func breakMeteor(_ meteor: Meteor) {
@@ -889,8 +958,9 @@ private final class BarrageGame: ObservableObject {
         message="METEOR SHATTERED  +200 — FRAGMENTS INBOUND"
         audio.play("airburst",enabled:rules.soundEnabled)
         // Four distinct, interceptable fragments diverge toward surviving cities.
-        let offsets=[-0.16,-0.055,0.065,0.17]
-        for offset in offsets {
+        let fragments=max(1,rules.meteorFragments)
+        for i in 0..<fragments {
+            let offset=(Double(i)-Double(fragments-1)/2)*0.105
             let aim=Point2(x:max(0.04,min(0.96,meteor.target.x+offset)),y:ground)
             hostiles.append(Hostile(origin:meteor.point,point:meteor.point,
                 target:aim,speed:min(0.19,meteor.speed*2.4),
@@ -917,7 +987,7 @@ private final class BarrageGame: ObservableObject {
         hostiles.append(Hostile(origin:origin,point:origin,
             target:Point2(x:cityLocations[i],y:ground),
             speed:min(0.32,0.084*progression*difficulty.multiplier*Double(rules.missileSpeed)/100*randomSpeed),
-            splits:wave >= 3 && (pattern == .mirv ? spawned.isMultiple(of:3) :
+            splits:rules.mirvEnabled && wave >= 3 && (pattern == .mirv ? spawned.isMultiple(of:3) :
                 Int.random(in:0..<100) < min(28,6+wave*2))))
     }
 }
@@ -934,7 +1004,7 @@ private struct BarrageWindow: View {
         VStack(spacing:0) {
             HStack(spacing:14) {
                 Text("VECTOR BARRAGE").font(.system(size:16,weight:.heavy,design:.monospaced)).tracking(2)
-                Text("v1.1.1").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
+                Text("v1.2.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
                 Spacer()
                 Picker("Display",selection:$game.mode) {
                     ForEach(VisualMode.allCases) { Text($0.rawValue).tag($0) }
