@@ -45,6 +45,16 @@ private struct Burst: Identifiable {
     var hostile: Bool
     var radius: Double { maxRadius * max(0, sin(min(1, age/1.05) * .pi)) }
 }
+private struct ImpactFX: Identifiable {
+    let id = UUID()
+    var point: Point2
+    var age = 0.0
+    var danger: Bool
+    var points: Int
+}
+private enum AttackPattern: String {
+    case wide = "WIDE FRONT", flank = "FLANK ATTACK", cluster = "CLUSTER RAID", mirv = "MIRV ALERT"
+}
 private enum Difficulty: String, CaseIterable, Identifiable {
     case cadet = "Cadet", veteran = "Veteran", ace = "Ace"
     var id: String { rawValue }
@@ -61,6 +71,11 @@ private final class BarrageGame: ObservableObject {
     @Published var hostiles: [Hostile] = []
     @Published var defenses: [Defense] = []
     @Published var bursts: [Burst] = []
+    @Published var impacts: [ImpactFX] = []
+    @Published var combo = 0
+    @Published var bestCombo = 0
+    @Published var totalIntercepts = 0
+    @Published var assault = "WIDE FRONT"
     @Published var cities = Array(repeating: true, count: 6)
     @Published var ammo = [12,12,12]
     @Published var selected = 1
@@ -80,6 +95,11 @@ private final class BarrageGame: ObservableObject {
     private var spawnTimer = 0.0
     private var spawned = 0
     private var quota = 0
+    private var pattern: AttackPattern = .wide
+    private var lastWaveBatch = -1
+    private var recovery = 0.0
+    private var gameSeconds = 0.0
+    private var lastIntercept = -100.0
     private var lastTick: Date?
     var alive: Int { cities.filter { $0 }.count }
 
@@ -87,16 +107,20 @@ private final class BarrageGame: ObservableObject {
         hostiles = []; defenses = []; bursts = []
         cities = Array(repeating: true, count: 6)
         score = 0; wave = 1; selected = 1
+        combo = 0; bestCombo = 0; totalIntercepts = 0; gameSeconds = 0
         running = true; paused = false; gameOver = false; waiting = false
         nextWave()
     }
     private func nextWave() {
-        hostiles = []; defenses = []; bursts = []
+        hostiles = []; defenses = []; bursts = []; impacts = []
         ammo = [12,12,12]
-        spawned = 0; spawnTimer = 0
-        quota = min(36, 6 + wave * 3)
+        spawned = 0; spawnTimer = 0; recovery = 1.4; lastWaveBatch = -1
+        pattern = wave < 2 ? .wide : [.wide,.flank,.cluster,.mirv][(wave-1)%4]
+        assault = pattern.rawValue
+        combo = 0; lastIntercept = -100
+        quota = min(30, 6 + wave * 3)
         waiting = false
-        message = "WAVE \(wave) — DEFEND THE CITIES"
+        message = "WAVE \(wave) — \(assault)"
     }
     func select(_ n: Int) { if (0..<3).contains(n) { selected = n } }
     func cycleBattery() { selected = (selected + 1) % batteries.count }
@@ -129,9 +153,20 @@ private final class BarrageGame: ObservableObject {
         guard let lastTick else { return }
         let dt = max(0,min(0.05,now.timeIntervalSince(lastTick)))
         guard running && !paused && !waiting else { return }
+        gameSeconds += dt
+        for i in impacts.indices { impacts[i].age += dt }
+        impacts.removeAll { $0.age >= 0.85 }
+        if gameSeconds-lastIntercept > 2.4 { combo = 0 }
+        if recovery > 0 { recovery -= dt; return }
+        if spawned > 0 && spawned.isMultiple(of:6) && lastWaveBatch != spawned {
+            lastWaveBatch = spawned
+            recovery = 1.2
+            message = "NEXT FORMATION INBOUND"
+            return
+        }
         spawnTimer += dt
         let interval = max(0.36,difficulty.interval * pow(0.94,Double(wave-1)))
-        if spawned < quota && spawnTimer >= interval {
+        if spawned < quota && spawnTimer >= interval && hostiles.count < (difficulty == .ace ? 10 : 8) {
             spawnTimer -= interval
             spawnEnemy()
             spawned += 1
@@ -162,21 +197,37 @@ private final class BarrageGame: ObservableObject {
         bursts.removeAll { $0.age >= 1.05 }
         var removed = Set<UUID>()
         // A defensive explosion may destroy any number of missiles: chain reaction scoring.
+        var kills: [Hostile] = []
         for missile in hostiles {
             if bursts.contains(where: { !$0.hostile && $0.radius > 0 && missile.point.distance($0.point) <= $0.radius }) {
                 removed.insert(missile.id)
-                score += missile.splits ? 50 : 25
-                bursts.append(Burst(point:missile.point,maxRadius:0.023,hostile:true))
+                kills.append(missile)
+                bursts.append(Burst(point:missile.point,maxRadius:0.032,hostile:true))
             } else if missile.point.y >= ground-0.00001 {
                 removed.insert(missile.id)
                 if let hit = cityLocations.indices.min(by: {
                     abs(cityLocations[$0]-missile.target.x) < abs(cityLocations[$1]-missile.target.x)
                 }), abs(cityLocations[hit]-missile.target.x) < 0.09, cities[hit] {
                     cities[hit] = false
+                    combo = 0
                     message = "CITY LOST — \(alive) REMAINING"
                 }
+                impacts.append(ImpactFX(point:missile.point,danger:true,points:0))
                 bursts.append(Burst(point:missile.point,maxRadius:0.045,hostile:true))
             }
+        }
+        if !kills.isEmpty {
+            combo = gameSeconds-lastIntercept < 2.4 ? combo+kills.count : kills.count
+            bestCombo = max(combo,bestCombo)
+            totalIntercepts += kills.count
+            lastIntercept = gameSeconds
+            for (i,missile) in kills.enumerated() {
+                let points = (missile.splits ? 50 : 25)*min(4,1+(combo-kills.count+i)/3)
+                score += points
+                impacts.append(ImpactFX(point:missile.point,danger:false,points:points))
+            }
+            message = kills.count >= 3 ? "CHAIN REACTION ×\(kills.count) — COMBO \(combo)" :
+                kills.count == 2 ? "DOUBLE INTERCEPT — COMBO \(combo)" : "INTERCEPT CONFIRMED"
         }
         hostiles.removeAll { removed.contains($0.id) }
         if alive == 0 {
@@ -184,7 +235,7 @@ private final class BarrageGame: ObservableObject {
             message = "GAME OVER — SCORE \(score)"
         } else if spawned >= quota && hostiles.isEmpty && defenses.isEmpty {
             waiting = true
-            let bonus = alive*100 + ammo.reduce(0,+)*5
+            let bonus = alive*100 + ammo.reduce(0,+)*5 + bestCombo*20
             score += bonus
             message = "WAVE \(wave) CLEARED +\(bonus) — RETURN FOR NEXT WAVE"
         }
@@ -192,11 +243,19 @@ private final class BarrageGame: ObservableObject {
     private func spawnEnemy() {
         let targets = cityLocations.indices.filter { cities[$0] }
         guard let i = targets.randomElement() else { return }
-        let origin = Point2(x:Double.random(in:0.04...0.96),y:0.02)
+        let originX: Double
+        switch pattern {
+        case .wide: originX = Double.random(in:0.04...0.96)
+        case .flank: originX = Double.random(in:0.03...0.19) + (spawned.isMultiple(of:2) ? 0 : 0.78)
+        case .cluster: originX = Double.random(in:0.35...0.65)
+        case .mirv: originX = Double.random(in:0.12...0.88)
+        }
+        let origin = Point2(x:originX,y:0.02)
         hostiles.append(Hostile(origin:origin,point:origin,
             target:Point2(x:cityLocations[i],y:ground),
-            speed:(0.084+Double(wave-1)*0.008)*difficulty.multiplier*Double.random(in:0.87...1.17),
-            splits:wave >= 3 && Int.random(in:0..<100) < min(38,8+wave*3)))
+            speed:min(0.19,0.084+Double(wave-1)*0.006)*difficulty.multiplier*Double.random(in:0.88...1.10),
+            splits:wave >= 3 && (pattern == .mirv ? spawned.isMultiple(of:3) :
+                Int.random(in:0..<100) < min(28,6+wave*2))))
     }
 }
 
@@ -207,7 +266,7 @@ private struct BarrageWindow: View {
         VStack(spacing:0) {
             HStack(spacing:14) {
                 Text("VECTOR BARRAGE").font(.system(size:16,weight:.heavy,design:.monospaced)).tracking(2)
-                Text("v0.2.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
+                Text("v0.3.0").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary)
                 Spacer()
                 Picker("Display",selection:$game.mode) {
                     ForEach(VisualMode.allCases) { Text($0.rawValue).tag($0) }
