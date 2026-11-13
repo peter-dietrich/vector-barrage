@@ -290,7 +290,7 @@ private final class BarrageGame: ObservableObject {
     private var lastEmptySound = Date.distantPast
     private let streamInterval = 0.19
     var alive: Int { cities.filter { $0 }.count }
-    var lowAmmoThreshold: Int { max(1,Int(ceil(Double(max(4,rules.batteryAmmo))*0.20))) }
+    var lowAmmoThreshold: Int { Int(floor(Double(max(4,rules.batteryAmmo))*0.20)) }
     func isLowAmmo(_ bank: Int) -> Bool {
         ammo.indices.contains(bank) && ammo[bank] <= lowAmmoThreshold
     }
