@@ -992,6 +992,135 @@ private final class BarrageGame: ObservableObject {
     }
 }
 
+private struct CustomGameSettings: View {
+    @Binding var rules: GameRules
+    @Binding var mode: VisualMode
+    @Binding var difficulty: Difficulty
+    var onCancel: () -> Void
+    var onApply: () -> Void
+    private func counter(_ title:String,_ value:Binding<Int>,range:ClosedRange<Int>,step:Int=1) -> some View {
+        Stepper("\(title): \(value.wrappedValue)",value:value,in:range,step:step)
+    }
+    private func percentage(_ title:String,_ value:Binding<Int>,range:ClosedRange<Int>,step:Int=5) -> some View {
+        VStack(alignment:.leading,spacing:4) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text("\(value.wrappedValue)%").monospacedDigit().foregroundStyle(.secondary)
+            }
+            Slider(value:Binding(get:{Double(value.wrappedValue)},
+                                  set:{value.wrappedValue=Int($0)}),
+                   in:Double(range.lowerBound)...Double(range.upperBound),step:Double(step))
+        }
+    }
+    var body: some View {
+        VStack(alignment:.leading,spacing:0) {
+            HStack {
+                VStack(alignment:.leading,spacing:4) {
+                    Text("CUSTOM GAME").font(.system(.title2,design:.monospaced).bold())
+                    Text("Configure a new battle • Changes apply when you start")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Restore Defaults") { rules=GameRules();mode = .modern;difficulty = .veteran }
+            }.padding(20)
+            Divider()
+            ScrollView {
+                Form {
+                    Section("Starting Conditions") {
+                        Picker("Difficulty",selection:$difficulty) {
+                            ForEach(Difficulty.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        Picker("Display",selection:$mode) {
+                            ForEach(VisualMode.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        counter("Starting wave",$rules.startingWave,range:1...20)
+                        Text("Six cities and three batteries are fixed to maintain battlefield geometry.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Section("Missile Batteries & Defensive Weapons") {
+                        counter("Starting ammunition per battery",$rules.batteryAmmo,range:4...30)
+                        counter("Additional rounds per wave",$rules.ammoGrowth,range:0...10)
+                        counter("Continuous-fire shots per second",$rules.fireRate,range:1...12)
+                        percentage("Interceptor travel speed",$rules.interceptorSpeed,range:50...200,step:10)
+                        percentage("Interceptor blast radius",$rules.explosionRadius,range:50...180,step:10)
+                        Toggle("Enable nuclear interceptors (three per game)",isOn:$rules.nuclearEnabled)
+                        counter("Supply-truck transit seconds",$rules.supplyTruckSeconds,range:1...10)
+                        counter("Three-kill blast bonus points",$rules.multiKillBonus,range:0...1000,step:50)
+                    }
+                    Section("Incoming Missile Threats") {
+                        percentage("Missiles per wave",$rules.waveSize,range:50...175,step:25)
+                        percentage("Incoming missile speed",$rules.missileSpeed,range:60...200,step:10)
+                        percentage("Incoming spawn frequency",$rules.missileSpawnRate,range:50...200,step:10)
+                        Toggle("Enable MIRV splitting missiles",isOn:$rules.mirvEnabled)
+                    }
+                    Section("Meteor Encounters") {
+                        Toggle("Enable meteors",isOn:$rules.meteorEnabled)
+                        if rules.meteorEnabled {
+                            counter("First meteor wave",$rules.meteorFirstWave,range:1...20)
+                            counter("Separate hits per meteor",$rules.meteorHealth,range:1...8)
+                            counter("Fragments after breakup",$rules.meteorFragments,range:1...8)
+                            percentage("Meteor descent speed",$rules.meteorSpeed,range:40...200,step:10)
+                            percentage("Meteor frequency",$rules.meteorFrequency,range:25...200,step:25)
+                        }
+                    }
+                    Section("Stealth Bomber Attacks") {
+                        Toggle("Enable bomber encounters",isOn:$rules.bomberEnabled)
+                        if rules.bomberEnabled {
+                            counter("First bomber wave",$rules.bomberFirstWave,range:1...20)
+                            percentage("Bomber flight speed",$rules.bomberSpeed,range:50...175,step:5)
+                            percentage("Bomber appearance frequency",$rules.bomberFrequency,range:25...200,step:25)
+                        }
+                    }
+                    Section("Alerts & Rewards") {
+                        percentage("Low-ammunition warning threshold",$rules.lowAmmoPercent,range:5...50,step:5)
+                        percentage("City proximity warning threshold",$rules.proximityPercent,range:5...50,step:5)
+                        Text("Alerts track remaining ammo and each incoming missile's flight path.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Section("Atmosphere & Day/Night Cycle") {
+                        Toggle("Dynamic background scenery",isOn:$rules.sceneryEnabled)
+                        if rules.sceneryEnabled {
+                            Toggle("Procedural stars at night",isOn:$rules.starsEnabled)
+                            Toggle("Drifting clouds",isOn:$rules.cloudsEnabled)
+                            Toggle("Random starting time of day",isOn:$rules.randomStartHour)
+                            if !rules.randomStartHour {
+                                counter("Starting hour (24-hour clock)",$rules.startHour,range:0...23)
+                            }
+                            HStack {
+                                Text("Hours advanced each wave")
+                                Spacer()
+                                Picker("Hours advanced each wave",selection:$rules.hoursPerWave) {
+                                    ForEach([0.0,0.5,1.0,1.5,2.0,2.75,3.0,4.0,6.0,12.0],id:\.self) { hour in
+                                        Text(String(format:"%.2g",hour)).tag(hour)
+                                    }
+                                }.labelsHidden().frame(width:115)
+                            }
+                        }
+                        Text("Mountains, atmosphere, and the day/night sky adapt automatically.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Section("Sound & Visual Effects") {
+                        Toggle("Arcade sound effects",isOn:$rules.soundEnabled)
+                        Toggle("Reduce bright flashes and screen shake",isOn:$rules.reducedFlash)
+                    }
+                }
+                .formStyle(.grouped)
+                .padding(.horizontal,8)
+            }
+            Divider()
+            HStack {
+                Text("Settings are saved with the battle. Existing saved games remain independent.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Cancel",action:onCancel)
+                Button("Apply & Start",action:onApply).buttonStyle(.borderedProminent)
+            }.padding(16)
+        }
+        .frame(width:680,height:740)
+    }
+}
+
 private struct BarrageWindow: View {
     @StateObject private var game = BarrageGame()
     private let clock = Timer.publish(every:1.0/60.0,on:.main,in:.common).autoconnect()
@@ -1000,6 +1129,8 @@ private struct BarrageWindow: View {
     @State private var savedBattles: [SavedBattle] = []
     @State private var saveNotice = ""
     @State private var editRules = GameRules()
+    @State private var editMode: VisualMode = .modern
+    @State private var editDifficulty: Difficulty = .veteran
     var body: some View {
         VStack(spacing:0) {
             HStack(spacing:14) {
@@ -1017,7 +1148,10 @@ private struct BarrageWindow: View {
                 }.toggleStyle(.button).help("Arcade sound effects")
                 Button("Truck") { game.redistributeAmmo() }.help("T: balance rounds via 3-second supply truck")
                 Button("Nuclear") { game.launchNuclear() }.help("N: fire selected battery's one nuclear interceptor")
-                Button("Custom Game") { editRules=game.rules;showCustom=true }
+                Button("Custom Game") {
+                    editRules=game.rules;editMode=game.mode;editDifficulty=game.difficulty
+                    showCustom=true
+                }
                 Button("Save Game") {
                     if game.saveBattle() { saveNotice="Battle saved." }
                     else { saveNotice="Start a battle before saving." }
@@ -1074,34 +1208,15 @@ private struct BarrageWindow: View {
         }
         .onReceive(clock) { game.tick($0) }
         .sheet(isPresented:$showCustom) {
-            VStack(alignment:.leading,spacing:16) {
-                Text("CUSTOM GAME").font(.system(.title2,design:.monospaced).bold())
-                Text("Apply these rules to a new battle. Current progress will restart.")
-                    .foregroundStyle(.secondary)
-                Stepper("Starting wave: \(editRules.startingWave)",value:$editRules.startingWave,in:1...20)
-                Stepper("Starting interceptors per battery: \(editRules.batteryAmmo)",
-                        value:$editRules.batteryAmmo,in:4...30)
-                Text("+2 rounds per battery for each new wave")
-                    .font(.caption).foregroundStyle(.secondary)
-                VStack(alignment:.leading) {
-                    Text("Incoming missiles per wave: \(editRules.waveSize)%")
-                    Slider(value:Binding(get:{Double(editRules.waveSize)},set:{editRules.waveSize=Int($0)}),
-                           in:50...175,step:25)
-                }
-                VStack(alignment:.leading) {
-                    Text("Incoming missile speed: \(editRules.missileSpeed)%")
-                    Slider(value:Binding(get:{Double(editRules.missileSpeed)},set:{editRules.missileSpeed=Int($0)}),
-                           in:60...150,step:10)
-                }
-                Toggle("Arcade sounds",isOn:$editRules.soundEnabled)
-                Toggle("Reduce bright flashes",isOn:$editRules.reducedFlash)
-                HStack {
-                    Button("Cancel") { showCustom=false }
-                    Spacer()
-                    Button("Apply & Start") { game.rules=editRules;game.start();showCustom=false }
-                        .buttonStyle(.borderedProminent)
-                }
-            }.padding(24).frame(width:440)
+            CustomGameSettings(rules:$editRules,mode:$editMode,difficulty:$editDifficulty,
+                               onCancel:{showCustom=false},
+                               onApply:{
+                                   game.rules=editRules
+                                   game.mode=editMode
+                                   game.difficulty=editDifficulty
+                                   game.start()
+                                   showCustom=false
+                               })
         }
         .sheet(isPresented:$showSaved) {
             VStack(alignment:.leading,spacing:12) {
@@ -1162,7 +1277,7 @@ private struct BarrageWindow: View {
         // Vector Drift-style dimensional starfield: fixed stars are seeded from
         // the saved scenery seed, with subtle color, size and independent twinkle.
         let starBrightness=pow(night,1.55)
-        if starBrightness > 0.015 {
+        if game.rules.starsEnabled && starBrightness > 0.015 {
             for i in 0..<155 {
                 let seed=game.scenerySeed
                 let u=Double((i*71_827 + seed*31) % 100_003)/100_003
@@ -1191,6 +1306,7 @@ private struct BarrageWindow: View {
         }
         // Slow clouds cross the playfield independent of missiles and waves.
         let cloudAlpha=0.13+daylight*0.23
+        if game.rules.cloudsEnabled {
         for layer in 0..<7 {
             let speed=0.0018+Double(layer%3)*0.0008
             let base=Double(layer)*0.19-0.18
@@ -1203,6 +1319,7 @@ private struct BarrageWindow: View {
             cloud.addEllipse(in:CGRect(x:x+cw*0.43,y:y,width:cw*0.41,height:29))
             cloud.addEllipse(in:CGRect(x:x+cw*0.68,y:y+9,width:cw*0.31,height:21))
             context.fill(cloud,with:.color(Color(red:0.78,green:0.85,blue:0.92).opacity(cloudAlpha)))
+        }
         }
         // More natural, irregular ridges: sampled at 90 points per layer and
         // interpolated smoothly. Back ridge is lighter for aerial perspective.
@@ -1269,7 +1386,7 @@ private struct BarrageWindow: View {
         }
         let ground=h*0.88
         if modern {
-            drawScenery(context:ctx,size:size,ground:ground)
+            if game.rules.sceneryEnabled { drawScenery(context:ctx,size:size,ground:ground) }
             for i in 1..<12 {
                 let y=h*CGFloat(i)/12
                 line(CGPoint(x:0,y:y),CGPoint(x:w,y:y),cyan.opacity(0.045),0.65)
@@ -1804,7 +1921,7 @@ private struct BarrageTelemetry: View {
                     }
                     .font(.system(size:10,weight:.heavy,design:.monospaced))
                     .foregroundStyle(.orange)
-                    Text("3 HITS TO BREAK • FRAGMENTS")
+                    Text("ARMORED METEOR • FRAGMENTS")
                         .font(.system(size:9,design:.monospaced))
                         .foregroundStyle(muted)
                         .padding(.bottom,5)
@@ -1871,7 +1988,7 @@ private struct BarrageTelemetry: View {
                             Text("PROXIMITY ALERT")
                         }
                         .font(.system(size:12,weight:.black,design:.monospaced))
-                        Text("\(game.criticalThreatCount) MISSILE(S) / FINAL 25%")
+                        Text("\(game.criticalThreatCount) MISSILE(S) / FINAL \(game.rules.proximityPercent)%")
                             .font(.system(size:10,weight:.bold,design:.monospaced))
                     }
                     .foregroundStyle(game.proximityPulseOn ? Color.white : Color.red)
@@ -1881,7 +1998,7 @@ private struct BarrageTelemetry: View {
                                 in:RoundedRectangle(cornerRadius:5))
                     .overlay(RoundedRectangle(cornerRadius:5).stroke(Color.red,lineWidth:1))
                     .padding(.top,13)
-                    .accessibilityLabel("Proximity alert: \(game.criticalThreatCount) missiles in final twenty-five percent")
+                    .accessibilityLabel("Proximity alert: \(game.criticalThreatCount) missiles in final \(game.rules.proximityPercent) percent")
                 }
                 Spacer(minLength: 9)
                 Text(game.difficulty.rawValue.uppercased() + "  /  " + game.mode.rawValue.uppercased())
