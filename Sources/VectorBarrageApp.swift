@@ -1167,26 +1167,68 @@ private struct BarrageWindow: View {
         }
         if let aircraft=game.bomber {
             let p=point(aircraft.point)
-            // Original flying-wing geometry inspired by stealth aircraft,
-            // without a licensed model or silhouette asset.
+            // A clear side-on flying-wing profile, drawn procedurally and
+            // mirrored with the actual flight direction.
+            var profileContext=ctx
+            profileContext.translateBy(x:p.x,y:p.y)
+            profileContext.scaleBy(x:aircraft.direction >= 0 ? 1 : -1,y:1)
+            var fuselage=Path()
+            fuselage.move(to:CGPoint(x:53,y:0))
+            fuselage.addQuadCurve(to:CGPoint(x:25,y:-9),control:CGPoint(x:47,y:-6))
+            fuselage.addLine(to:CGPoint(x:6,y:-14))
+            fuselage.addLine(to:CGPoint(x:-30,y:-14))
+            fuselage.addLine(to:CGPoint(x:-48,y:-10))
+            fuselage.addLine(to:CGPoint(x:-57,y:-4))
+            fuselage.addLine(to:CGPoint(x:-46,y:0))
+            fuselage.addLine(to:CGPoint(x:-22,y:4))
+            fuselage.addLine(to:CGPoint(x:10,y:4))
+            fuselage.addLine(to:CGPoint(x:36,y:3))
+            fuselage.closeSubpath()
+            profileContext.fill(fuselage,with:.color(Color(red:0.13,green:0.20,blue:0.29)))
+            profileContext.stroke(fuselage,with:.color(.white.opacity(0.91)),lineWidth:1.8)
+            // Wing is swept away from the camera; nose/cockpit and two engine
+            // outlets establish a side profile rather than an overhead triangle.
             var wing=Path()
-            wing.move(to:CGPoint(x:p.x,y:p.y-16))
-            wing.addLine(to:CGPoint(x:p.x-58,y:p.y+10))
-            wing.addLine(to:CGPoint(x:p.x-37,y:p.y+13))
-            wing.addLine(to:CGPoint(x:p.x-12,y:p.y+4))
-            wing.addLine(to:CGPoint(x:p.x,y:p.y+12))
-            wing.addLine(to:CGPoint(x:p.x+12,y:p.y+4))
-            wing.addLine(to:CGPoint(x:p.x+37,y:p.y+13))
-            wing.addLine(to:CGPoint(x:p.x+58,y:p.y+10))
+            wing.move(to:CGPoint(x:11,y:-6))
+            wing.addLine(to:CGPoint(x:-18,y:-24))
+            wing.addLine(to:CGPoint(x:-46,y:-25))
+            wing.addLine(to:CGPoint(x:-24,y:-10))
             wing.closeSubpath()
-            ctx.fill(wing,with:.color(Color(red:0.18,green:0.25,blue:0.34)))
-            ctx.stroke(wing,with:.color(.white.opacity(0.9)),lineWidth:2)
-            ctx.fill(Path(ellipseIn:CGRect(x:p.x-5,y:p.y-6,width:10,height:10)),
-                     with:.color(.cyan.opacity(0.7)))
+            profileContext.fill(wing,with:.color(Color(red:0.22,green:0.29,blue:0.39)))
+            profileContext.stroke(wing,with:.color(.cyan.opacity(0.70)),lineWidth:1.4)
+            profileContext.fill(Path(roundedRect:CGRect(x:26,y:-3,width:16,height:5),cornerRadius:2),
+                with:.color(Color(red:0.42,green:0.66,blue:0.75).opacity(0.87)))
+            for y in [-10.0,-5.0] {
+                profileContext.fill(Path(CGRect(x:-49,y:y,width:9,height:3)),
+                    with:.color(Color(red:0.34,green:0.55,blue:0.61)))
+            }
+            profileContext.stroke(Path(CGRect(x:-20,y:-15,width:18,height:3)),
+                with:.color(.orange.opacity(0.7)),lineWidth:0.7)
             ctx.draw(Text("STEALTH BOMBER")
                     .font(.system(size:10,weight:.bold,design:.monospaced))
                     .foregroundColor(.orange),
-                    at:CGPoint(x:p.x,y:p.y-31))
+                    at:CGPoint(x:p.x,y:p.y-43))
+        }
+        // Bombs retain aircraft momentum before accelerating downward,
+        // creating a visibly curved path rather than an aimed missile line.
+        for bomb in game.fallingBombs {
+            let p=point(bomb.point)
+            let tail=CGPoint(x:p.x-bomb.velocityX*w*0.13,
+                             y:p.y-bomb.velocityY*h*0.13)
+            line(tail,p,.orange.opacity(0.75),1.7)
+            let angle=atan2(bomb.velocityY*h,bomb.velocityX*w)
+            var bodyContext=ctx
+            bodyContext.translateBy(x:p.x,y:p.y)
+            bodyContext.rotate(by:.radians(angle))
+            let casing=Path(roundedRect:CGRect(x:-9,y:-3.5,width:18,height:7),cornerRadius:3)
+            bodyContext.fill(casing,with:.color(Color(red:0.78,green:0.80,blue:0.85)))
+            bodyContext.stroke(casing,with:.color(.white),lineWidth:1)
+            var fins=Path()
+            fins.move(to:CGPoint(x:-6,y:-3))
+            fins.addLine(to:CGPoint(x:-11,y:-7))
+            fins.move(to:CGPoint(x:-6,y:3))
+            fins.addLine(to:CGPoint(x:-11,y:7))
+            bodyContext.stroke(fins,with:.color(.orange),lineWidth:1.5)
         }
         for fx in game.bomberExplosions {
             let p=point(fx.point)
