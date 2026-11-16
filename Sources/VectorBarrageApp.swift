@@ -517,11 +517,13 @@ private final class BarrageGame: ObservableObject {
         isFiringStream=false; repeatFireTime=0
         atomicShots=[];atomicBursts=[];supplyTruck=nil;bomber=nil;fallingBombs=[];bomberExplosions=[]
         screenShake=0;nextBomberTime=gameSeconds + Double.random(in:13...18)*100/Double(max(25,rules.bomberFrequency))
-        // Keep every unfired round in its existing battery, then issue one
-        // configurable new round to each at every subsequent wave.
+        // Each subsequent wave grants its FULL level allocation to each
+        // battery on top of that battery's remaining ammunition.
+        // Example, standard game: wave 2 grants 13 rounds per battery;
+        // 5 unused from wave 1 becomes 18 at the start of wave 2.
         if !isFirstWave {
-            let issue = max(0,rules.ammoGrowth)
-            ammo = ammo.map { $0 + issue }
+            let allocation = initialAmmoPerBattery
+            ammo = ammo.map { $0 + allocation }
         }
         waveOpeningAmmo = ammo
         spawned = 0; spawnTimer = 0; recovery = 1.4; lastWaveBatch = -1
@@ -1188,8 +1190,10 @@ private struct CustomGameSettings: View {
                     }
                     Section("Missile Batteries & Defensive Weapons") {
                         counter("Starting ammunition per battery",$rules.batteryAmmo,range:4...30)
-                        counter("New rounds per battery each wave",$rules.ammoGrowth,range:0...10)
-                        Text("Unused ammunition carries forward separately for each battery.")
+                        counter("Increase in each level's allocation",$rules.ammoGrowth,range:0...10)
+                        Text("Each new wave adds its full level allocation to the unused rounds in each battery.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text("Default: wave 1 = 12, wave 2 = 13, wave 3 = 14 new rounds per battery, plus carryover.")
                             .font(.caption).foregroundStyle(.secondary)
                         counter("Continuous-fire shots per second",$rules.fireRate,range:1...12)
                         percentage("Interceptor travel speed",$rules.interceptorSpeed,range:50...200,step:10)
@@ -1293,8 +1297,8 @@ private struct BarrageWindow: View {
                             Text("VECTOR BARRAGE")
                                 .font(.system(size:19,weight:.black,design:.monospaced))
                                 .foregroundStyle(.white)
-                            Text("v2026.11.13a")
-                                .help("Source build identifier: v2026.11.13a")
+                            Text("v2026.11.16a")
+                                .help("Source build identifier: v2026.11.16a")
                                 .font(.system(size:10,weight:.medium,design:.monospaced))
                                 .foregroundStyle(.gray)
                         }
