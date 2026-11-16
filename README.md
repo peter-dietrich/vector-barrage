@@ -174,3 +174,7 @@ Patriot-style launchers are now 20% smaller than v1.2.6 (scaled at 72% of origin
 ## v2026.11.13a — streamlined perimeter
 
 Removed the redundant 48-point lower score and battery bar. The right telemetry is the canonical location for score, record holder, current wave, city status and battery ammunition. Pause, Supply Truck and Nuclear controls now sit in the top settings row between difficulty and graphics, and the thin bottom instruction/status strip remains. The freed vertical space expands the battlefield. The in-game source build label uses the same date-and-letter format as Vector Drift. Xcode's numeric marketing version uses `2026.11.13` because Apple version metadata doesn't accept a trailing letter.
+
+## v2026.11.16a — full wave allocation plus unused ammo
+
+Each battery starts with 12 rounds in standard wave 1. Each subsequent wave adds that wave's **entire new allocation** to ammunition left in that particular battery, without resetting or pooling rounds. New allocations are wave 2 = 13, wave 3 = 14, wave 4 = 15, etc. For example, if battery A ends wave 1 with 5 rounds, it starts wave 2 with 18 (5+13). Custom Game 'Increase in each level's allocation' sets how much the fresh allocation increases every wave; supply truck redistribution remains available. The low-ammo alert uses each battery's new opening total. Older saved battles continue with their actual ammunition amounts.
