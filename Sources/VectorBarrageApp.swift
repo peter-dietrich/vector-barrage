@@ -64,6 +64,8 @@ private struct Burst: Identifiable, Codable {
     var hostile: Bool
     // Optional to preserve decoding of save slots created before v0.6.
     var interceptionCount: Int? = nil
+    // One successful hit per interceptor, regardless of targets destroyed.
+    var hitConfirmed: Bool? = nil
     var radius: Double { maxRadius * max(0, sin(min(1, age/1.05) * .pi)) }
 }
 private struct SupplyTruck: Codable {
@@ -249,6 +251,9 @@ private struct SavedBattle: Codable, Identifiable {
     var meteorQuota: Int? = nil
     var meteorSpawned: Int? = nil
     var nextMeteorTime: Double? = nil
+    var shotsFired: Int? = nil
+    var shotsHit: Int? = nil
+    var shotsMissed: Int? = nil
 }
 @MainActor
 private enum BattleStore {
@@ -373,6 +378,20 @@ private final class BarrageGame: ObservableObject {
     @Published var combo = 0
     @Published var bestCombo = 0
     @Published var totalIntercepts = 0
+    @Published var shotsFired = 0
+    @Published var shotsHit = 0
+    @Published var shotsMissed = 0
+    var resolvedShots: Int { shotsHit + shotsMissed }
+    var hitRate: Double {
+        resolvedShots > 0 ? Double(shotsHit)*100/Double(resolvedShots) : 0
+    }
+    // Ignore repeat hits from the same blast. One interceptor = one shot.
+    private func confirmHit(for burstID: UUID) {
+        guard let index = bursts.firstIndex(where: { $0.id == burstID }),
+              bursts[index].hostile == false, bursts[index].hitConfirmed != true else { return }
+        bursts[index].hitConfirmed = true
+        shotsHit += 1
+    }
     @Published var assault = "WIDE FRONT"
     @Published var cities = Array(repeating: true, count: 6)
     @Published var ammo = [12,12,12]
@@ -493,6 +512,7 @@ private final class BarrageGame: ObservableObject {
         ammo = Array(repeating:initialAmmoPerBattery,count:3)
         waveOpeningAmmo = ammo
         combo = 0; bestCombo = 0; totalIntercepts = 0; gameSeconds = 0
+        shotsFired = 0; shotsHit = 0; shotsMissed = 0
         running = true; paused = false; gameOver = false; waiting = false
         nextWave()
     }
@@ -586,6 +606,7 @@ private final class BarrageGame: ObservableObject {
         let target = Point2(x: max(0.02,min(0.98,location.x)), y: max(0.03,min(0.81,location.y)))
         let launch = Point2(x: batteries[selected],y:ground)
         ammo[selected] -= 1
+        shotsFired += 1
         defenses.append(Defense(origin:launch,point:launch,target:target))
         launches.append(LaunchFX(point:launch))
         battlePulse = max(battlePulse,0.13)
@@ -739,9 +760,10 @@ private final class BarrageGame: ObservableObject {
                     message="BOMBER STRIKE — CITY \(bomb.targetCity+1) LOST"
                 }
                 impacts.append(ImpactFX(point:bomb.point,danger:true,points:0))
-            } else if bursts.contains(where: {
+            } else if let hitBlast=bursts.first(where: {
                 !$0.hostile && $0.radius > 0 && $0.point.distance(bomb.point) <= $0.radius
             }) {
+                confirmHit(for:hitBlast.id)
                 score += 50
                 totalIntercepts += 1
                 impacts.append(ImpactFX(point:bomb.point,danger:false,points:50))
@@ -802,6 +824,9 @@ private final class BarrageGame: ObservableObject {
         }
         defenses.removeAll { $0.point.distance($0.target) < 0.00001 }
         for i in bursts.indices { bursts[i].age += dt }
+        for burst in bursts where !burst.hostile && burst.age >= 1.05 {
+            if burst.hitConfirmed != true { shotsMissed += 1 }
+        }
         bursts.removeAll { $0.age >= 1.05 }
         // Meteor armor: three DISTINCT interceptor blasts must connect.
         // A single expanding ring cannot consume all three hit points.
@@ -815,6 +840,7 @@ private final class BarrageGame: ObservableObject {
             if !newHits.isEmpty {
                 // Cap each frame at remaining hit points, counting unique blasts.
                 for blast in newHits.prefix(meteor.health) {
+                    confirmHit(for: blast.id)
                     meteor.hitBursts.append(blast.id)
                     meteor.health -= 1
                     score += 70
@@ -844,9 +870,10 @@ private final class BarrageGame: ObservableObject {
             }
         }
         meteors=activeMeteors
-        if let aircraft=bomber, bursts.contains(where: {
+        if let aircraft=bomber, let hitBlast=bursts.first(where: {
             !$0.hostile && $0.radius > 0 && $0.point.distance(aircraft.point) < $0.radius+0.045
         }) {
+            confirmHit(for:hitBlast.id)
             bomber=nil
             bomberExplosions.append(BomberExplosion(point:aircraft.point))
             screenShake=max(screenShake,0.95)
@@ -869,6 +896,7 @@ private final class BarrageGame: ObservableObject {
             }) {
                 removed.insert(missile.id)
                 kills.append(missile)
+                confirmHit(for:bursts[index].id)
                 bursts[index].interceptionCount = (bursts[index].interceptionCount ?? 0) + 1
                 let count = bursts[index].interceptionCount ?? 0
                 if count == 3 {
@@ -946,7 +974,8 @@ private final class BarrageGame: ObservableObject {
             supplyTruck:supplyTruck,bomber:bomber,nextBomberTime:nextBomberTime,
             fallingBombs:fallingBombs,timeOfDay:timeOfDay,scenerySeed:scenerySeed,
             meteors:meteors,meteorQuota:meteorQuota,meteorSpawned:meteorSpawned,
-            nextMeteorTime:nextMeteorTime)
+            nextMeteorTime:nextMeteorTime,
+            shotsFired:shotsFired,shotsHit:shotsHit,shotsMissed:shotsMissed)
         BattleStore.insert(battle)
         message="GAME SAVED — WAVE \(wave)"
         return true
@@ -957,6 +986,9 @@ private final class BarrageGame: ObservableObject {
         hostiles=b.hostiles;defenses=b.defenses;bursts=b.bursts
         cities=b.cities;ammo=b.ammo;waveOpeningAmmo=b.waveOpeningAmmo ?? b.ammo
         selected=b.selected;score=b.score;wave=b.wave
+        shotsFired=b.shotsFired ?? 0
+        shotsHit=b.shotsHit ?? 0
+        shotsMissed=b.shotsMissed ?? 0
         running=b.running;waiting=b.waiting;gameOver=b.gameOver
         combo=b.combo;bestCombo=b.bestCombo;totalIntercepts=b.totalIntercepts
         spawned=b.spawned;spawnTimer=b.spawnTimer;quota=b.quota
@@ -1297,7 +1329,7 @@ private struct BarrageWindow: View {
                             Text("VECTOR BARRAGE")
                                 .font(.system(size:19,weight:.black,design:.monospaced))
                                 .foregroundStyle(.white)
-                            Text("v2026.11.16a")
+                            Text("v2026.11.16b")
                                 .help("Source build identifier: v2026.11.16a")
                                 .font(.system(size:10,weight:.medium,design:.monospaced))
                                 .foregroundStyle(.gray)
@@ -2230,6 +2262,20 @@ private struct BarrageTelemetry: View {
                 }
                 label("INCOMING THREATS")
                 big(String(format: "%02d",game.hostiles.count),size:21)
+                rule
+                label("HIT / MISS RATIO")
+                HStack(alignment:.firstTextBaseline,spacing:5) {
+                    Text("\(game.shotsHit) H / \(game.shotsMissed) M")
+                        .font(.system(size:13,weight:.bold,design:.monospaced))
+                        .foregroundStyle(ice)
+                    Spacer(minLength:0)
+                    Text(String(format:"%.0f%%",game.hitRate))
+                        .font(.system(size:16,weight:.heavy,design:.monospaced))
+                        .foregroundStyle(amber)
+                }.padding(.top,4)
+                Text("\(game.resolvedShots) RESOLVED • \(game.shotsFired) FIRED")
+                    .font(.system(size:9,design:.monospaced))
+                    .foregroundStyle(muted)
                 rule
                 label("BEST CHAIN / INTERCEPTS")
                 Text("\(game.bestCombo)  /  \(game.totalIntercepts)")
