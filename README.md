@@ -178,3 +178,7 @@ Removed the redundant 48-point lower score and battery bar. The right telemetry 
 ## v2026.11.16a — full wave allocation plus unused ammo
 
 Each battery starts with 12 rounds in standard wave 1. Each subsequent wave adds that wave's **entire new allocation** to ammunition left in that particular battery, without resetting or pooling rounds. New allocations are wave 2 = 13, wave 3 = 14, wave 4 = 15, etc. For example, if battery A ends wave 1 with 5 rounds, it starts wave 2 with 18 (5+13). Custom Game 'Increase in each level's allocation' sets how much the fresh allocation increases every wave; supply truck redistribution remains available. The low-ammo alert uses each battery's new opening total. Older saved battles continue with their actual ammunition amounts.
+
+## v2026.11.16b — live hit/miss statistics
+
+The right telemetry now shows shots hit, shots missed, hit percentage and total fired/resolved. Each regular interceptor fired counts as one shot. A defensive blast is a hit when it connects with at least one incoming missile, interceptable bomb, bomber or meteor (regardless of how many targets it destroys). It becomes a miss only after its explosion expires without hitting anything, so airborne and still-active rounds remain pending. Scores and nuclear launches do not inflate regular interceptor accuracy. The hit/miss stats are kept across waves in a run and preserved in saved games; older saves load with zeroed accuracy stats.
