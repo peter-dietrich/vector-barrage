@@ -96,7 +96,25 @@ jobs:
           python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); s=r.get("status"); print("Apple notarization:",s); sys.exit(0 if s=="Accepted" else 1)' \
             "$RUNNER_TEMP/notary-result.json"
           xcrun stapler staple "$APP"
-          xcrun stapler validate "$APP"
+          # Gatekeeper ticket validation may briefly lose its CloudKit
+          # connection even after Apple accepted notarization and stapling.
+          # Never publish unless validation succeeds.
+          validation_ok=0
+          for attempt in 1 2 3 4 5; do
+            if xcrun stapler validate "$APP"; then
+              validation_ok=1
+              break
+            fi
+            if [[ "$attempt" != "5" ]]; then
+              delay=$((attempt * 15))
+              echo "::warning::Stapler validation failed; retrying after ${delay}s"
+              sleep "$delay"
+            fi
+          done
+          if [[ "$validation_ok" != "1" ]]; then
+            echo "::error::Stapler validation failed after five attempts"
+            exit 1
+          fi
           mkdir -p dist
           ditto -c -k --keepParent "$APP" "dist/VectorBarrage-macOS.zip"
           (cd dist && shasum -a 256 VectorBarrage-macOS.zip > VectorBarrage-macOS.zip.sha256)
