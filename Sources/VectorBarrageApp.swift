@@ -4,6 +4,7 @@ import AVFoundation
 
 @main
 struct VectorBarrageApp: App {
+    @NSApplicationDelegateAdaptor(ArcadeIconAppDelegate.self) private var iconDelegate
     var body: some Scene {
         WindowGroup("Vector Barrage") {
             BarrageWindow().frame(minWidth: 920, minHeight: 650).preferredColorScheme(.dark)
