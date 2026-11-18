@@ -9,7 +9,7 @@ struct VectorBarrageApp: App {
             BarrageWindow().frame(minWidth: 920, minHeight: 650).preferredColorScheme(.dark)
         }
         .defaultSize(width: 1200, height: 790)
-        .commands { CommandGroup(replacing: .newItem) {} }
+        .commands { CommandGroup(replacing: .newItem) {} GameHelpCommands() }
     }
 }
 
