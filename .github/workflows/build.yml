@@ -16,3 +16,5 @@ jobs:
             -configuration Debug \
             -destination 'platform=macOS' \
             CODE_SIGNING_ALLOWED=NO build
+      - name: Verify bundled macOS app icon
+        run: bash scripts/check-app-branding.sh VectorBarrage
